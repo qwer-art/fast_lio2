@@ -6,16 +6,11 @@ LIO调试数据记录脚本
 使用方法:
     python3 lio_debug_recorder.py
 
-输出目录:
-    logs/<timestamp>/debug_data/
-        - lio_debug_pose.csv: 最终Pose和IMU预积分Pose
-        - lio_debug_delta.csv: 帧间Delta Pose
-        - lio_debug_bias.csv: IMU Bias
-        - lio_debug_quality.csv: 匹配质量
-        - lio_debug_velocity.csv: 速度
+输出文件:
+    logs/<timestamp>/lio_debug.csv - 所有数据合并到一个文件，按frame_time对齐
 
 PlotJuggler加载CSV:
-    File -> Load Data -> 选择CSV文件
+    File -> Load Data -> 选择 lio_debug.csv
 """
 
 import rclpy
@@ -28,9 +23,7 @@ from std_msgs.msg import Float64MultiArray
 
 import csv
 import os
-import sys
 from datetime import datetime
-from collections import defaultdict
 
 # 项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,224 +36,200 @@ class LIODebugRecorder(Node):
         # 创建带时间戳的输出目录
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.log_dir = os.path.join(PROJECT_ROOT, 'logs', self.timestamp)
-        self.output_dir = os.path.join(self.log_dir, 'debug_data')
-        os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.log_dir, exist_ok=True)
 
-        # CSV文件和writer
-        self.csv_files = {}
-        self.csv_writers = {}
+        # 最新数据缓存（用于无时间戳的消息）
+        self.latest_quality = None  # [feat_num, res_mean, solve_time]
+        self.latest_delta = None    # [x, y, z, roll, pitch, yaw]
 
-        # 初始化各CSV文件
-        self._init_csv('pose', [
+        # 上一次写入的时间戳（用于检查单调性）
+        self.last_timestamp = 0.0
+
+        # CSV文件
+        self.csv_path = os.path.join(self.log_dir, 'lio_debug.csv')
+        self.csv_file = open(self.csv_path, 'w', newline='')
+        self.csv_writer = csv.writer(self.csv_file)
+
+        # 写入header
+        self.csv_writer.writerow([
             'timestamp', 'frame_time',
+            # Pose数据
             'odom_x', 'odom_y', 'odom_z',
-            'odom_qx', 'odom_qy', 'odom_qz', 'odom_qw',
             'odom_roll', 'odom_pitch', 'odom_yaw',
             'preint_x', 'preint_y', 'preint_z',
-            'preint_qx', 'preint_qy', 'preint_qz', 'preint_qw',
             'preint_roll', 'preint_pitch', 'preint_yaw',
-        ])
-
-        self._init_csv('delta', [
-            'timestamp', 'frame_time',
+            # IMU Bias
+            'bg_x', 'bg_y', 'bg_z',
+            'ba_x', 'ba_y', 'ba_z',
+            # 速度
+            'vx', 'vy', 'vz',
+            # 匹配质量
+            'feat_num', 'res_mean', 'solve_time',
+            # Delta Pose
             'delta_x', 'delta_y', 'delta_z',
             'delta_roll', 'delta_pitch', 'delta_yaw',
         ])
 
-        self._init_csv('bias', [
-            'timestamp', 'frame_time',
-            'bg_x', 'bg_y', 'bg_z',
-            'ba_x', 'ba_y', 'ba_z',
-        ])
-
-        self._init_csv('quality', [
-            'timestamp', 'frame_time',
-            'feat_num', 'res_mean', 'solve_time',
-        ])
-
-        self._init_csv('velocity', [
-            'timestamp', 'frame_time',
-            'vx', 'vy', 'vz',
-        ])
-
-        # QoS设置 - 使用RELIABLE匹配publisher
+        # QoS设置
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.VOLATILE,
             depth=10
         )
 
-        # 数据缓存（用于同步不同topic的数据）
-        self.data_cache = defaultdict(dict)
-
         # 订阅topics
-        self.sub_odom = self.create_subscription(
-            Odometry, '/odometry', self.cb_odom, qos)
+        self.create_subscription(Odometry, '/odometry', self.cb_odom, qos)
+        self.create_subscription(PoseStamped, '/debug/imu_preint_pose', self.cb_preint, qos)
+        self.create_subscription(Pose, '/debug/delta_pose', self.cb_delta, qos)
+        self.create_subscription(Vector3Stamped, '/debug/imu_bias_gyro', self.cb_bias_gyro, qos)
+        self.create_subscription(Vector3Stamped, '/debug/imu_bias_acc', self.cb_bias_acc, qos)
+        self.create_subscription(Float64MultiArray, '/debug/match_quality', self.cb_quality, qos)
+        self.create_subscription(Vector3Stamped, '/debug/velocity', self.cb_velocity, qos)
 
-        self.sub_preint = self.create_subscription(
-            PoseStamped, '/debug/imu_preint_pose', self.cb_preint, qos)
-
-        self.sub_delta = self.create_subscription(
-            Pose, '/debug/delta_pose', self.cb_delta, qos)
-
-        self.sub_bias_gyro = self.create_subscription(
-            Vector3Stamped, '/debug/imu_bias_gyro', self.cb_bias_gyro, qos)
-
-        self.sub_bias_acc = self.create_subscription(
-            Vector3Stamped, '/debug/imu_bias_acc', self.cb_bias_acc, qos)
-
-        self.sub_quality = self.create_subscription(
-            Float64MultiArray, '/debug/match_quality', self.cb_quality, qos)
-
-        self.sub_velocity = self.create_subscription(
-            Vector3Stamped, '/debug/velocity', self.cb_velocity, qos)
+        # 当前帧数据缓存
+        self.current_frame = {}
 
         self.get_logger().info(f'LIO Debug Recorder started')
-        self.get_logger().info(f'Log directory: {self.log_dir}')
+        self.get_logger().info(f'Output: {self.csv_path}')
 
-        # 写入运行信息
-        self._write_run_info()
-
-    def _write_run_info(self):
-        """写入运行信息"""
-        info_file = os.path.join(self.log_dir, 'run_info.txt')
-        with open(info_file, 'w') as f:
-            f.write(f'Run Time: {self.timestamp}\n')
-            f.write(f'Output Directory: {self.output_dir}\n')
-            f.write(f'\nSubscribed Topics:\n')
-            f.write(f'  - /odometry\n')
-            f.write(f'  - /debug/imu_preint_pose\n')
-            f.write(f'  - /debug/delta_pose\n')
-            f.write(f'  - /debug/imu_bias_gyro\n')
-            f.write(f'  - /debug/imu_bias_acc\n')
-            f.write(f'  - /debug/match_quality\n')
-            f.write(f'  - /debug/velocity\n')
-
-    def _init_csv(self, name, headers):
-        """初始化CSV文件"""
-        filepath = os.path.join(self.output_dir, f'lio_debug_{name}.csv')
-        self.csv_files[name] = open(filepath, 'w', newline='')
-        self.csv_writers[name] = csv.writer(self.csv_files[name])
-        self.csv_writers[name].writerow(headers)
+    def _to_frame_time(self, timestamp):
+        """将时间戳对齐到50ms网格"""
+        return round(timestamp / 0.05) * 0.05
 
     def _quat_to_rpy(self, qx, qy, qz, qw):
         """四元数转欧拉角"""
         import math
-        # Roll
         sinr_cosp = 2 * (qw * qx + qy * qz)
         cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
         roll = math.atan2(sinr_cosp, cosr_cosp)
 
-        # Pitch
         sinp = 2 * (qw * qy - qz * qx)
-        if abs(sinp) >= 1:
-            pitch = math.copysign(math.pi / 2, sinp)
-        else:
-            pitch = math.asin(sinp)
+        pitch = math.copysign(math.pi / 2, sinp) if abs(sinp) >= 1 else math.asin(sinp)
 
-        # Yaw
         siny_cosp = 2 * (qw * qz + qx * qy)
         cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
         yaw = math.atan2(siny_cosp, cosy_cosp)
 
         return roll, pitch, yaw
 
-    def _to_frame_time(self, timestamp):
-        """将时间戳对齐到50ms网格"""
-        frame_interval = 0.05  # 50ms
-        return round(timestamp / frame_interval) * frame_interval
+    def _write_row(self, timestamp, odom, preint=None, bg=None, ba=None, vel=None, quality=None, delta=None):
+        """写入一行数据"""
+        frame_time = self._to_frame_time(timestamp)
+
+        row = [f'{timestamp:.6f}', f'{frame_time:.3f}']
+
+        # odom pose
+        if odom:
+            row.extend([f'{odom[0]:.6f}', f'{odom[1]:.6f}', f'{odom[2]:.6f}',
+                        f'{odom[3]:.6f}', f'{odom[4]:.6f}', f'{odom[5]:.6f}'])
+        else:
+            row.extend([''] * 6)
+
+        # preint pose
+        if preint:
+            row.extend([f'{preint[0]:.6f}', f'{preint[1]:.6f}', f'{preint[2]:.6f}',
+                        f'{preint[3]:.6f}', f'{preint[4]:.6f}', f'{preint[5]:.6f}'])
+        else:
+            row.extend([''] * 6)
+
+        # gyro bias
+        if bg:
+            row.extend([f'{bg[0]:.6f}', f'{bg[1]:.6f}', f'{bg[2]:.6f}'])
+        else:
+            row.extend([''] * 3)
+
+        # acc bias
+        if ba:
+            row.extend([f'{ba[0]:.6f}', f'{ba[1]:.6f}', f'{ba[2]:.6f}'])
+        else:
+            row.extend([''] * 3)
+
+        # velocity
+        if vel:
+            row.extend([f'{vel[0]:.6f}', f'{vel[1]:.6f}', f'{vel[2]:.6f}'])
+        else:
+            row.extend([''] * 3)
+
+        # quality
+        if quality:
+            row.extend([f'{quality[0]:.0f}', f'{quality[1]:.6f}', f'{quality[2]:.6f}'])
+        else:
+            row.extend([''] * 3)
+
+        # delta pose
+        if delta:
+            row.extend([f'{delta[0]:.6f}', f'{delta[1]:.6f}', f'{delta[2]:.6f}',
+                        f'{delta[3]:.6f}', f'{delta[4]:.6f}', f'{delta[5]:.6f}'])
+        else:
+            row.extend([''] * 6)
+
+        self.csv_writer.writerow(row)
+        self.csv_file.flush()
 
     def cb_odom(self, msg: Odometry):
-        """最终Pose回调"""
+        """odom作为主触发器，写入一行数据"""
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+
+        # 检查时间戳单调性，跳过乱序消息
+        if t < self.last_timestamp:
+            return
+        self.last_timestamp = t
+
         p = msg.pose.pose.position
         o = msg.pose.pose.orientation
         roll, pitch, yaw = self._quat_to_rpy(o.x, o.y, o.z, o.w)
+        odom = [p.x, p.y, p.z, roll, pitch, yaw]
 
-        self.data_cache[t]['odom'] = [
-            p.x, p.y, p.z,
-            o.x, o.y, o.z, o.w,
-            roll, pitch, yaw,
-        ]
-        self._try_write_pose(t)
+        # 获取当前帧的其他数据
+        preint = self.current_frame.get('preint')
+        bg = self.current_frame.get('bg')
+        ba = self.current_frame.get('ba')
+        vel = self.current_frame.get('vel')
+
+        # 使用最新的quality和delta（这些消息没有时间戳）
+        quality = self.latest_quality
+        delta = self.latest_delta
+
+        self._write_row(t, odom, preint, bg, ba, vel, quality, delta)
+
+        # 清空当前帧缓存
+        self.current_frame = {}
 
     def cb_preint(self, msg: PoseStamped):
-        """IMU预积分Pose回调"""
+        """IMU预积分Pose"""
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         p = msg.pose.position
         o = msg.pose.orientation
         roll, pitch, yaw = self._quat_to_rpy(o.x, o.y, o.z, o.w)
-
-        self.data_cache[t]['preint'] = [
-            p.x, p.y, p.z,
-            o.x, o.y, o.z, o.w,
-            roll, pitch, yaw,
-        ]
-        self._try_write_pose(t)
-
-    def _try_write_pose(self, t):
-        """尝试写入pose数据（需要odom和preint都到达）"""
-        if 'odom' in self.data_cache[t] and 'preint' in self.data_cache[t]:
-            frame_time = self._to_frame_time(t)
-            row = [t, frame_time] + self.data_cache[t]['odom'] + self.data_cache[t]['preint']
-            self.csv_writers['pose'].writerow(row)
-            del self.data_cache[t]
+        self.current_frame['preint'] = [p.x, p.y, p.z, roll, pitch, yaw]
 
     def cb_delta(self, msg: Pose):
-        """帧间Delta Pose回调"""
-        # 使用当前时间戳
-        t = self.get_clock().now().nanoseconds * 1e-9
-        frame_time = self._to_frame_time(t)
+        """帧间Delta Pose - 无时间戳，缓存最新值"""
         p = msg.position
         o = msg.orientation
         roll, pitch, yaw = self._quat_to_rpy(o.x, o.y, o.z, o.w)
-
-        self.csv_writers['delta'].writerow([
-            t, frame_time, p.x, p.y, p.z, roll, pitch, yaw
-        ])
+        self.latest_delta = [p.x, p.y, p.z, roll, pitch, yaw]
 
     def cb_bias_gyro(self, msg: Vector3Stamped):
-        """陀螺仪Bias回调"""
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        self.data_cache[t]['bg'] = [msg.vector.x, msg.vector.y, msg.vector.z]
-        self._try_write_bias(t)
+        """陀螺仪Bias"""
+        self.current_frame['bg'] = [msg.vector.x, msg.vector.y, msg.vector.z]
 
     def cb_bias_acc(self, msg: Vector3Stamped):
-        """加速度计Bias回调"""
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        self.data_cache[t]['ba'] = [msg.vector.x, msg.vector.y, msg.vector.z]
-        self._try_write_bias(t)
-
-    def _try_write_bias(self, t):
-        """尝试写入bias数据"""
-        if 'bg' in self.data_cache[t] and 'ba' in self.data_cache[t]:
-            frame_time = self._to_frame_time(t)
-            row = [t, frame_time] + self.data_cache[t]['bg'] + self.data_cache[t]['ba']
-            self.csv_writers['bias'].writerow(row)
-            del self.data_cache[t]
+        """加速度计Bias"""
+        self.current_frame['ba'] = [msg.vector.x, msg.vector.y, msg.vector.z]
 
     def cb_quality(self, msg: Float64MultiArray):
-        """匹配质量回调"""
-        t = self.get_clock().now().nanoseconds * 1e-9
-        frame_time = self._to_frame_time(t)
+        """匹配质量 - 无时间戳，缓存最新值"""
         if len(msg.data) >= 3:
-            self.csv_writers['quality'].writerow([
-                t, frame_time, msg.data[0], msg.data[1], msg.data[2]
-            ])
+            self.latest_quality = [msg.data[0], msg.data[1], msg.data[2]]
 
     def cb_velocity(self, msg: Vector3Stamped):
-        """速度回调"""
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        frame_time = self._to_frame_time(t)
-        self.csv_writers['velocity'].writerow([
-            t, frame_time, msg.vector.x, msg.vector.y, msg.vector.z
-        ])
+        """速度"""
+        self.current_frame['vel'] = [msg.vector.x, msg.vector.y, msg.vector.z]
 
     def close(self):
-        """关闭所有CSV文件"""
-        for f in self.csv_files.values():
-            f.close()
-        print(f'CSV files saved to: {self.output_dir}')
+        self.csv_file.close()
+        print(f'CSV saved: {self.csv_path}')
 
 
 def main(args=None):
