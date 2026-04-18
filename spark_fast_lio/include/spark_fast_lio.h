@@ -8,6 +8,10 @@
 #include <Eigen/Core>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/vector3_stamped.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -146,6 +150,9 @@ class SPARKFastLIO2 : public rclcpp::Node {
   bool isMotionStopped(const V3D &acc_ref, const V3D &acc_curr, const double acc_diff_thr);
 
   void processLidarAndImu(MeasureGroup &Measure);
+
+  void publishDebugData(const state_ikfom &state, const rclcpp::Time &stamp);
+
  private:
   std::mutex buffer_mutex_;
 
@@ -163,6 +170,18 @@ class SPARKFastLIO2 : public rclcpp::Node {
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cloud_base_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path_;
+
+  // Debug publishers
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_debug_preint_pose_;
+  rclcpp::Publisher<geometry_msgs::msg::Pose>::SharedPtr pub_debug_delta_pose_;
+  rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr pub_debug_bias_gyro_;
+  rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr pub_debug_bias_acc_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_debug_quality_;
+  rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr pub_debug_velocity_;
+
+  // Debug state
+  state_ikfom last_state_;  // 上一帧状态，用于计算delta_pose
+  bool has_last_state_ = false;
 
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;

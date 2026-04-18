@@ -19,6 +19,7 @@ spark_fast_lio/Log/*
 spark_fast_lio/PCD/*
 spark_fast_lio/PCD/*.pcd
 spark_fast_lio/Log/mat_pre.txt
+spark_fast_lio/logs/
 
 prompt/
 

@@ -113,6 +113,14 @@ SPARKFastLIO2::SPARKFastLIO2(const rclcpp::NodeOptions &options)
   pub_path_                 = create_publisher<nav_msgs::msg::Path>("path", qos);
   path_msg_.header.frame_id = map_frame_;
 
+  // Debug publishers
+  pub_debug_preint_pose_ = create_publisher<geometry_msgs::msg::PoseStamped>("debug/imu_preint_pose", qos);
+  pub_debug_delta_pose_  = create_publisher<geometry_msgs::msg::Pose>("debug/delta_pose", qos);
+  pub_debug_bias_gyro_   = create_publisher<geometry_msgs::msg::Vector3Stamped>("debug/imu_bias_gyro", qos);
+  pub_debug_bias_acc_    = create_publisher<geometry_msgs::msg::Vector3Stamped>("debug/imu_bias_acc", qos);
+  pub_debug_quality_     = create_publisher<std_msgs::msg::Float64MultiArray>("debug/match_quality", qos);
+  pub_debug_velocity_    = create_publisher<geometry_msgs::msg::Vector3Stamped>("debug/velocity", qos);
+
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
   tf_buffer_      = std::make_shared<tf2_ros::Buffer>(this->get_clock());
   tf_listener_    = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -776,6 +784,76 @@ void SPARKFastLIO2::publishPath(const state_ikfom &state) {
   }
 }
 
+void SPARKFastLIO2::publishDebugData(const state_ikfom &state, const rclcpp::Time &stamp) {
+  // 1. IMU预积分Pose (从kf_for_preintegration_获取)
+  if (kf_for_preintegration_.has_value()) {
+    geometry_msgs::msg::PoseStamped preint_msg;
+    preint_msg.header.stamp = stamp;
+    preint_msg.header.frame_id = map_frame_;
+    auto preint_state = kf_for_preintegration_->get_x();
+    preint_msg.pose.position.x = preint_state.pos(0);
+    preint_msg.pose.position.y = preint_state.pos(1);
+    preint_msg.pose.position.z = preint_state.pos(2);
+    preint_msg.pose.orientation.x = preint_state.rot.x();
+    preint_msg.pose.orientation.y = preint_state.rot.y();
+    preint_msg.pose.orientation.z = preint_state.rot.z();
+    preint_msg.pose.orientation.w = preint_state.rot.w();
+    pub_debug_preint_pose_->publish(preint_msg);
+  }
+
+  // 2. 帧间Delta Pose
+  if (has_last_state_) {
+    geometry_msgs::msg::Pose delta_msg;
+    // 位置差
+    V3D delta_pos = state.pos - last_state_.pos;
+    delta_msg.position.x = delta_pos(0);
+    delta_msg.position.y = delta_pos(1);
+    delta_msg.position.z = delta_pos(2);
+    // 姿态差 (相对旋转)
+    Eigen::Quaterniond delta_rot = state.rot * last_state_.rot.inverse();
+    delta_msg.orientation.x = delta_rot.x();
+    delta_msg.orientation.y = delta_rot.y();
+    delta_msg.orientation.z = delta_rot.z();
+    delta_msg.orientation.w = delta_rot.w();
+    pub_debug_delta_pose_->publish(delta_msg);
+  }
+
+  // 3. IMU Bias
+  geometry_msgs::msg::Vector3Stamped bias_gyro_msg;
+  bias_gyro_msg.header.stamp = stamp;
+  bias_gyro_msg.vector.x = state.bg(0);
+  bias_gyro_msg.vector.y = state.bg(1);
+  bias_gyro_msg.vector.z = state.bg(2);
+  pub_debug_bias_gyro_->publish(bias_gyro_msg);
+
+  geometry_msgs::msg::Vector3Stamped bias_acc_msg;
+  bias_acc_msg.header.stamp = stamp;
+  bias_acc_msg.vector.x = state.ba(0);
+  bias_acc_msg.vector.y = state.ba(1);
+  bias_acc_msg.vector.z = state.ba(2);
+  pub_debug_bias_acc_->publish(bias_acc_msg);
+
+  // 4. 匹配质量
+  std_msgs::msg::Float64MultiArray quality_msg;
+  quality_msg.data.resize(3);
+  quality_msg.data[0] = static_cast<double>(effect_feat_num_);
+  quality_msg.data[1] = res_mean_last_;
+  quality_msg.data[2] = solve_time_;
+  pub_debug_quality_->publish(quality_msg);
+
+  // 5. 速度
+  geometry_msgs::msg::Vector3Stamped vel_msg;
+  vel_msg.header.stamp = stamp;
+  vel_msg.vector.x = state.vel(0);
+  vel_msg.vector.y = state.vel(1);
+  vel_msg.vector.z = state.vel(2);
+  pub_debug_velocity_->publish(vel_msg);
+
+  // 更新上一帧状态
+  last_state_ = state;
+  has_last_state_ = true;
+}
+
 void SPARKFastLIO2::publishFrameWorld(
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubCloud) {
   if (!scan_pub_en_) {
@@ -1135,6 +1213,7 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
   /******* Publish topics *******/
   const auto stamp = rclcpp::Time(lidar_end_time_ * 1e9);
   publishOdometry(latest_state_, stamp);
+  publishDebugData(latest_state_, stamp);
   mapIncremental();
 
   if (path_en_) {
