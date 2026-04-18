@@ -52,7 +52,7 @@ class LIODebugRecorder(Node):
 
         # 初始化各CSV文件
         self._init_csv('pose', [
-            'timestamp',
+            'timestamp', 'frame_time',
             'odom_x', 'odom_y', 'odom_z',
             'odom_qx', 'odom_qy', 'odom_qz', 'odom_qw',
             'odom_roll', 'odom_pitch', 'odom_yaw',
@@ -62,30 +62,30 @@ class LIODebugRecorder(Node):
         ])
 
         self._init_csv('delta', [
-            'timestamp',
+            'timestamp', 'frame_time',
             'delta_x', 'delta_y', 'delta_z',
             'delta_roll', 'delta_pitch', 'delta_yaw',
         ])
 
         self._init_csv('bias', [
-            'timestamp',
+            'timestamp', 'frame_time',
             'bg_x', 'bg_y', 'bg_z',
             'ba_x', 'ba_y', 'ba_z',
         ])
 
         self._init_csv('quality', [
-            'timestamp',
+            'timestamp', 'frame_time',
             'feat_num', 'res_mean', 'solve_time',
         ])
 
         self._init_csv('velocity', [
-            'timestamp',
+            'timestamp', 'frame_time',
             'vx', 'vy', 'vz',
         ])
 
-        # QoS设置
+        # QoS设置 - 使用RELIABLE匹配publisher
         qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
+            reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.VOLATILE,
             depth=10
         )
@@ -165,6 +165,11 @@ class LIODebugRecorder(Node):
 
         return roll, pitch, yaw
 
+    def _to_frame_time(self, timestamp):
+        """将时间戳对齐到50ms网格"""
+        frame_interval = 0.05  # 50ms
+        return round(timestamp / frame_interval) * frame_interval
+
     def cb_odom(self, msg: Odometry):
         """最终Pose回调"""
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -196,7 +201,8 @@ class LIODebugRecorder(Node):
     def _try_write_pose(self, t):
         """尝试写入pose数据（需要odom和preint都到达）"""
         if 'odom' in self.data_cache[t] and 'preint' in self.data_cache[t]:
-            row = [t] + self.data_cache[t]['odom'] + self.data_cache[t]['preint']
+            frame_time = self._to_frame_time(t)
+            row = [t, frame_time] + self.data_cache[t]['odom'] + self.data_cache[t]['preint']
             self.csv_writers['pose'].writerow(row)
             del self.data_cache[t]
 
@@ -204,12 +210,13 @@ class LIODebugRecorder(Node):
         """帧间Delta Pose回调"""
         # 使用当前时间戳
         t = self.get_clock().now().nanoseconds * 1e-9
+        frame_time = self._to_frame_time(t)
         p = msg.position
         o = msg.orientation
         roll, pitch, yaw = self._quat_to_rpy(o.x, o.y, o.z, o.w)
 
         self.csv_writers['delta'].writerow([
-            t, p.x, p.y, p.z, roll, pitch, yaw
+            t, frame_time, p.x, p.y, p.z, roll, pitch, yaw
         ])
 
     def cb_bias_gyro(self, msg: Vector3Stamped):
@@ -227,30 +234,33 @@ class LIODebugRecorder(Node):
     def _try_write_bias(self, t):
         """尝试写入bias数据"""
         if 'bg' in self.data_cache[t] and 'ba' in self.data_cache[t]:
-            row = [t] + self.data_cache[t]['bg'] + self.data_cache[t]['ba']
+            frame_time = self._to_frame_time(t)
+            row = [t, frame_time] + self.data_cache[t]['bg'] + self.data_cache[t]['ba']
             self.csv_writers['bias'].writerow(row)
             del self.data_cache[t]
 
     def cb_quality(self, msg: Float64MultiArray):
         """匹配质量回调"""
         t = self.get_clock().now().nanoseconds * 1e-9
+        frame_time = self._to_frame_time(t)
         if len(msg.data) >= 3:
             self.csv_writers['quality'].writerow([
-                t, msg.data[0], msg.data[1], msg.data[2]
+                t, frame_time, msg.data[0], msg.data[1], msg.data[2]
             ])
 
     def cb_velocity(self, msg: Vector3Stamped):
         """速度回调"""
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        frame_time = self._to_frame_time(t)
         self.csv_writers['velocity'].writerow([
-            t, msg.vector.x, msg.vector.y, msg.vector.z
+            t, frame_time, msg.vector.x, msg.vector.y, msg.vector.z
         ])
 
     def close(self):
         """关闭所有CSV文件"""
         for f in self.csv_files.values():
             f.close()
-        self.get_logger().info(f'CSV files saved to: {self.output_dir}')
+        print(f'CSV files saved to: {self.output_dir}')
 
 
 def main(args=None):
@@ -260,11 +270,12 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info('Shutting down...')
+        pass
     finally:
         node.close()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
