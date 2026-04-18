@@ -181,7 +181,9 @@ class SPARKFastLIO2 : public rclcpp::Node {
 
   // Debug state
   state_ikfom last_state_;  // 上一帧状态，用于计算delta_pose
+  state_ikfom preint_state_before_update_;  // IMU预积分状态（ESKF更新前）
   bool has_last_state_ = false;
+  bool has_preint_state_ = false;
 
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;

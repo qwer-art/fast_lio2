@@ -785,19 +785,22 @@ void SPARKFastLIO2::publishPath(const state_ikfom &state) {
 }
 
 void SPARKFastLIO2::publishDebugData(const state_ikfom &state, const rclcpp::Time &stamp) {
-  // 1. IMU预积分Pose (从kf_for_preintegration_获取)
-  if (kf_for_preintegration_.has_value()) {
+  // 1. IMU预积分Pose (从保存的预积分状态获取，应用重力对齐)
+  if (has_preint_state_) {
+    // 应用重力对齐变换
+    V3D preint_pos_aligned = R_gravity_aligned_ * preint_state_before_update_.pos;
+    Eigen::Quaterniond preint_rot_aligned(R_gravity_aligned_ * preint_state_before_update_.rot.toRotationMatrix());
+
     geometry_msgs::msg::PoseStamped preint_msg;
     preint_msg.header.stamp = stamp;
     preint_msg.header.frame_id = map_frame_;
-    auto preint_state = kf_for_preintegration_->get_x();
-    preint_msg.pose.position.x = preint_state.pos(0);
-    preint_msg.pose.position.y = preint_state.pos(1);
-    preint_msg.pose.position.z = preint_state.pos(2);
-    preint_msg.pose.orientation.x = preint_state.rot.x();
-    preint_msg.pose.orientation.y = preint_state.rot.y();
-    preint_msg.pose.orientation.z = preint_state.rot.z();
-    preint_msg.pose.orientation.w = preint_state.rot.w();
+    preint_msg.pose.position.x = preint_pos_aligned(0);
+    preint_msg.pose.position.y = preint_pos_aligned(1);
+    preint_msg.pose.position.z = preint_pos_aligned(2);
+    preint_msg.pose.orientation.x = preint_rot_aligned.x();
+    preint_msg.pose.orientation.y = preint_rot_aligned.y();
+    preint_msg.pose.orientation.z = preint_rot_aligned.z();
+    preint_msg.pose.orientation.w = preint_rot_aligned.w();
     pub_debug_preint_pose_->publish(preint_msg);
   }
 
@@ -833,12 +836,30 @@ void SPARKFastLIO2::publishDebugData(const state_ikfom &state, const rclcpp::Tim
   bias_acc_msg.vector.z = state.ba(2);
   pub_debug_bias_acc_->publish(bias_acc_msg);
 
-  // 4. 匹配质量
+  // 4. 匹配质量 (lidar_res + imu_res)
   std_msgs::msg::Float64MultiArray quality_msg;
-  quality_msg.data.resize(3);
+  quality_msg.data.resize(4);
   quality_msg.data[0] = static_cast<double>(effect_feat_num_);
-  quality_msg.data[1] = res_mean_last_;
+  quality_msg.data[1] = res_mean_last_;  // lidar残差
   quality_msg.data[2] = solve_time_;
+
+  // 计算IMU预积分残差（预积分预测状态 vs ESKF优化后状态）
+  double imu_res = 0.0;
+  if (has_preint_state_) {
+    // 应用重力对齐变换
+    V3D preint_pos_aligned = R_gravity_aligned_ * preint_state_before_update_.pos;
+    Eigen::Quaterniond preint_rot_aligned(R_gravity_aligned_ * preint_state_before_update_.rot.toRotationMatrix());
+
+    // 位置残差
+    V3D pos_diff = preint_pos_aligned - state.pos;
+    double pos_res = pos_diff.norm();
+    // 旋转残差 (角度差)
+    Eigen::Quaterniond rot_diff = preint_rot_aligned * state.rot.inverse();
+    double rot_res = 2.0 * std::acos(std::clamp(std::abs(rot_diff.w()), 0.0, 1.0));
+    // 综合残差 (位置 + 旋转角度)
+    imu_res = pos_res + rot_res;
+  }
+  quality_msg.data[3] = imu_res;  // imu残差
   pub_debug_quality_->publish(quality_msg);
 
   // 5. 速度
@@ -1159,6 +1180,11 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
   /*** iterated state estimation ***/
   double t_update_start = omp_get_wtime();
   double solve_H_time   = 0;
+
+  // 保存ESKF更新前的预积分状态（用于计算IMU残差）
+  preint_state_before_update_ = kf_.get_x();
+  has_preint_state_ = true;
+
   kf_.update_iterated_dyn_share_modified(LASER_POINT_COV, solve_H_time);
 
   /***** Perform gravity alignment *****/

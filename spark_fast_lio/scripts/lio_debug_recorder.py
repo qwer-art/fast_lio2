@@ -64,7 +64,7 @@ class LIODebugRecorder(Node):
             # 速度
             'vx', 'vy', 'vz',
             # 匹配质量
-            'feat_num', 'res_mean', 'solve_time',
+            'feat_num', 'lidar_res', 'solve_time', 'imu_res',
             # Delta Pose
             'delta_x', 'delta_y', 'delta_z',
             'delta_roll', 'delta_pitch', 'delta_yaw',
@@ -150,11 +150,11 @@ class LIODebugRecorder(Node):
         else:
             row.extend([''] * 3)
 
-        # quality
+        # quality (feat_num, lidar_res, solve_time, imu_res)
         if quality:
-            row.extend([f'{quality[0]:.0f}', f'{quality[1]:.6f}', f'{quality[2]:.6f}'])
+            row.extend([f'{quality[0]:.0f}', f'{quality[1]:.6f}', f'{quality[2]:.6f}', f'{quality[3]:.6f}'])
         else:
-            row.extend([''] * 3)
+            row.extend([''] * 4)
 
         # delta pose
         if delta:
@@ -220,8 +220,11 @@ class LIODebugRecorder(Node):
 
     def cb_quality(self, msg: Float64MultiArray):
         """匹配质量 - 无时间戳，缓存最新值"""
-        if len(msg.data) >= 3:
-            self.latest_quality = [msg.data[0], msg.data[1], msg.data[2]]
+        if len(msg.data) >= 4:
+            self.latest_quality = [msg.data[0], msg.data[1], msg.data[2], msg.data[3]]
+        elif len(msg.data) >= 3:
+            # 兼容旧版本（没有imu_res）
+            self.latest_quality = [msg.data[0], msg.data[1], msg.data[2], 0.0]
 
     def cb_velocity(self, msg: Vector3Stamped):
         """速度"""
