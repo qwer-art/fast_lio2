@@ -4,10 +4,10 @@
  *        and serialize to disk (frame_info JSON, lidar PCD, imu CSV).
  *
  * Usage:
- *   ros2 run spark_fast_lio spark_lio_sdk_demo <bag_path> [lidar_topic] [imu_topic]
+ *   ros2 run spark_fast_lio spark_lio_sdk_demo <bag_path> <asset_path>
  *
  * Example:
- *   ros2 run spark_fast_lio spark_lio_sdk_demo /data/velodyne_bag /velodyne_points /imu/data
+ *   ros2 run spark_fast_lio spark_lio_sdk_demo /data/velodyne_bag /output/path
  */
 
 #include <filesystem>
@@ -20,10 +20,6 @@
 #include "spark_lio_sdk.h"
 
 namespace fs = std::filesystem;
-
-// ---------- Output root directory ----------
-static const std::string asset_data{
-    "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/10_14_hathor/asset_data"};
 
 // ---------- Convert end_time (double seconds) to frame_time string ----------
 // Use 100ms as base unit, round to nearest 100ms boundary
@@ -63,9 +59,10 @@ static std::string toFrameTime(double end_time) {
 }
 
 // ---------- Save frame_info JSON ----------
-static bool saveFrameInfo(const std::string &frame_time,
+static bool saveFrameInfo(const std::string &asset_path,
+                          const std::string &frame_time,
                           double begin_time, double end_time) {
-  fs::path dir = fs::path(asset_data) / "frame_info";
+  fs::path dir = fs::path(asset_path) / "frame_info";
   fs::create_directories(dir);
 
   fs::path filepath = dir / (frame_time + ".json");
@@ -88,9 +85,10 @@ static bool saveFrameInfo(const std::string &frame_time,
 // ---------- Save lidar PLY ----------
 // Write only x, y, z, intensity to avoid CloudCompare warnings about
 // empty normal/curvature fields and camera/face elements that PCL adds.
-static bool saveLidarPly(const std::string &frame_time,
+static bool saveLidarPly(const std::string &asset_path,
+                         const std::string &frame_time,
                          const PointCloudXYZI::Ptr &cloud) {
-  fs::path dir = fs::path(asset_data) / "lidar";
+  fs::path dir = fs::path(asset_path) / "lidar";
   fs::create_directories(dir);
 
   fs::path filepath = dir / (frame_time + ".ply");
@@ -119,9 +117,10 @@ static bool saveLidarPly(const std::string &frame_time,
 }
 
 // ---------- Save imu CSV ----------
-static bool saveImuCsv(const std::string &frame_time,
+static bool saveImuCsv(const std::string &asset_path,
+                       const std::string &frame_time,
                        const std::deque<std::shared_ptr<const sensor_msgs::msg::Imu>> &imu_data) {
-  fs::path dir = fs::path(asset_data) / "imu";
+  fs::path dir = fs::path(asset_path) / "imu";
   fs::create_directories(dir);
 
   fs::path filepath = dir / (frame_time + ".csv");
@@ -157,16 +156,19 @@ static bool saveImuCsv(const std::string &frame_time,
 // ========================================================================
 
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    std::cerr << "Usage: " << argv[0] << " <bag_path> [lidar_topic] [imu_topic]" << std::endl;
-    std::cerr << "  lidar_topic default: /velodyne_points" << std::endl;
-    std::cerr << "  imu_topic   default: /imu/data" << std::endl;
+  if (argc < 3) {
+    std::cerr << "Usage: " << argv[0] << " <bag_path> <asset_path>" << std::endl;
+    std::cerr << "  bag_path    : rosbag2 directory path" << std::endl;
+    std::cerr << "  asset_path  : output directory for parsed data" << std::endl;
+    std::cerr << "  lidar_topic : /hathor/lidar_points (hardcoded)" << std::endl;
+    std::cerr << "  imu_topic   : /hathor/forward/imu (hardcoded)" << std::endl;
     return 1;
   }
 
   const std::string bag_path    = argv[1];
-  const std::string lidar_topic = (argc > 2) ? argv[2] : "/velodyne_points";
-  const std::string imu_topic   = (argc > 3) ? argv[3] : "/imu/data";
+  const std::string asset_path  = argv[2];
+  const std::string lidar_topic = "/hathor/lidar_points";  // Hardcoded
+  const std::string imu_topic   = "/hathor/forward/imu";   // Hardcoded
 
   // Configure the SDK
   spark_fast_lio::SparkLioSdk::Config config;
@@ -186,7 +188,7 @@ int main(int argc, char **argv) {
   }
 
   // Create output root directory
-  fs::create_directories(asset_data);
+  fs::create_directories(asset_path);
 
   // Iterate synchronized data and serialize
   MeasureGroup meas;
@@ -206,17 +208,17 @@ int main(int argc, char **argv) {
               << std::endl;
 
     // 1. Save frame_info JSON
-    saveFrameInfo(frame_time, meas.lidar_beg_time, meas.lidar_end_time);
+    saveFrameInfo(asset_path, frame_time, meas.lidar_beg_time, meas.lidar_end_time);
 
     // 2. Save lidar PLY
-    saveLidarPly(frame_time, meas.lidar);
+    saveLidarPly(asset_path, frame_time, meas.lidar);
 
     // 3. Save imu CSV
-    saveImuCsv(frame_time, meas.imu);
+    saveImuCsv(asset_path, frame_time, meas.imu);
   }
 
   std::cout << "Total synchronized frames: " << frame_count << std::endl;
-  std::cout << "Data saved to: " << asset_data << std::endl;
+  std::cout << "Data saved to: " << asset_path << std::endl;
   sdk.close();
   return 0;
 }
