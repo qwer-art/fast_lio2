@@ -37,6 +37,7 @@ bool SparkLioSdk::open(const std::string &bag_path,
                        const std::string &imu_topic,
                        const Config &config) {
   verbose_ = config.verbose;
+  scan_rate_ = config.scan_rate;
 
   // Configure preprocessor
   preprocessor_->lidar_type       = config.lidar_type;
@@ -149,11 +150,14 @@ bool SparkLioSdk::syncPackages(MeasureGroup &meas) {
       lidar_end_time_ = meas.lidar_beg_time + lidar_mean_scantime_;
     } else {
       scan_num_++;
-      if (meas.lidar->points.back().curvature < 80 ||
-          meas.lidar->points.back().curvature > 120) {
+      double expected_curvature = 1000.0 / scan_rate_;  // ms per frame
+      double tolerance = expected_curvature * 0.2;
+      if (meas.lidar->points.back().curvature < expected_curvature - tolerance ||
+          meas.lidar->points.back().curvature > expected_curvature + tolerance) {
         if (verbose_) {
           std::cerr << "[SparkLioSdk] WARNING: curvature (" << meas.lidar->points.back().curvature
-                    << ") should be close to 100. Check timestamp_unit." << std::endl;
+                    << ") should be close to " << expected_curvature
+                    << ". Check timestamp_unit." << std::endl;
         }
       }
 

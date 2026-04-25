@@ -7,11 +7,17 @@
 ## 编译
 
 ```bash
+# 1. 进入项目根目录
 cd /home/jerett/OpenProject/LidarSlam/spark-fast-lio
-source /opt/ros/humble/setup.bash
-colcon build --packages-select spark_fast_lio
-source install/setup.bash
+
+# 2. 初始化环境并编译
+source spark_fast_lio/init_env.sh build
 ```
+
+**说明：**
+- `init_env.sh` 会自动处理 Conda 环境冲突、设置 ROS2 环境、执行编译
+- 编译完成后会自动 `source install/setup.bash`
+- 如需仅初始化环境不编译：`source spark_fast_lio/init_env.sh`
 
 编译产物：
 
@@ -38,9 +44,9 @@ ros2 run spark_fast_lio spark_lio_sdk_demo <bag_path> [lidar_topic] [imu_topic]
 
 ```bash
 ros2 run spark_fast_lio spark_lio_sdk_demo \
-  /home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/10_14_hathor/asset_data \
-  /acl_jackal2/lidar_points \
-  /acl_jackal2/forward/imu
+  /home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/10_14_hathor \
+  /hathor/lidar_points \
+  /hathor/forward/imu
 ```
 
 输出示例：

@@ -81,6 +81,7 @@ class SparkLioSdk {
   double last_imu_time_       = 0.0;
   bool verbose_               = false;
   bool eof_                   = false;
+  int scan_rate_              = 10;
 
   // --- Preprocessor ---
   std::shared_ptr<Preprocess> preprocessor_;
