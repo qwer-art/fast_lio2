@@ -5,8 +5,33 @@
 # 项目路径
 PROJECT_DIR="/home/jerett/OpenProject/LidarSlam/spark-fast-lio"
 
-# 切换到项目目录
-cd $PROJECT_DIR
+# ============================================
+# Conda 环境处理
+# ============================================
+
+# 检查是否在 conda 环境中
+if [[ -n "$CONDA_PREFIX" ]]; then
+    echo "检测到当前 Conda 环境: $CONDA_DEFAULT_ENV"
+    echo "正在退出 Conda 环境..."
+    conda deactivate
+fi
+
+# 可选: 激活指定的 conda 环境 (取消注释以启用)
+# TARGET_CONDA_ENV="spark_fast_lio"  # 修改为你想要的环境名
+# if conda env list | grep -q "^$TARGET_CONDA_ENV "; then
+#     echo "激活 Conda 环境: $TARGET_CONDA_ENV"
+#     conda activate $TARGET_CONDA_ENV
+# else
+#     echo "警告: Conda 环境 '$TARGET_CONDA_ENV' 不存在，使用系统 Python"
+# fi
+
+# 或者: 完全使用系统 Python (推荐用于 ROS2)
+echo "使用系统 Python 环境"
+export PATH="/usr/bin:$PATH"
+
+# ============================================
+# ROS2 环境设置
+# ============================================
 
 # ROS2 环境设置 (ROS2 Humble)
 source /opt/ros/humble/setup.bash
@@ -19,6 +44,8 @@ fi
 echo "=========================================="
 echo "SPARK-FAST-LIO Environment Initialized"
 echo "Project Dir: $PROJECT_DIR"
+echo "Python: $(which python3)"
+echo "Conda Env: ${CONDA_DEFAULT_ENV:-系统环境}"
 echo "=========================================="
 
 # 编译函数

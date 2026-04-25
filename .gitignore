@@ -22,6 +22,7 @@ spark_fast_lio/Log/mat_pre.txt
 spark_fast_lio/logs/
 
 prompt/
+paper/
 
 ### C++ ###
 # Prerequisites
