@@ -172,7 +172,7 @@ spark_fast_lio/
 │   └── spark_lio_sdk.h          # SDK 头文件
 ├── src/
 │   ├── spark_lio_sdk.cpp        # SDK 实现 (rosbag2 读取 + syncPackages)
-│   └── main.cpp                 # SDK demo 可执行程序
+│   └── parser_sdk.cpp           # SDK demo 可执行程序
 └── CMakeLists.txt               # 包含 spark_lio_sdk 库和 spark_lio_sdk_demo 目标
 ```
 

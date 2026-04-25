@@ -160,7 +160,7 @@ ament_target_dependencies(spark_lio_sdk
 
 # ---- SDK demo executable ----
 add_executable(spark_lio_sdk_demo
-  src/main.cpp
+  src/parser_sdk.cpp
 )
 target_link_libraries(spark_lio_sdk_demo
   spark_lio_sdk
