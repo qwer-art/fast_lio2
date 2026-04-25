@@ -1,6 +1,9 @@
 #!/bin/bash
 
 # SPARK-FAST-LIO 环境初始化脚本
+# 使用方式: source spark_fast_lio/init_env.sh [build]
+#   - 无参数: 仅初始化环境
+#   - build:  编译项目
 
 # 项目路径
 PROJECT_DIR="/home/jerett/OpenProject/LidarSlam/spark-fast-lio"

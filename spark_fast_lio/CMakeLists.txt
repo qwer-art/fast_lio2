@@ -62,6 +62,8 @@ endif()
 
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(rosbag2_cpp REQUIRED)
+find_package(rosbag2_storage REQUIRED)
 
 if (CLEAR_WARNING_SUPPRESSION)
   unset(CMAKE_SUPPRESS_DEVELOPER_WARNINGS)
@@ -133,9 +135,45 @@ rclcpp_components_register_node(
   EXECUTABLE spark_lio_mapping
 )
 
+# ---- SDK library (offline bag reader + syncPackages) ----
+add_library(spark_lio_sdk SHARED
+  src/spark_lio_sdk.cpp
+  src/preprocess.cpp
+)
+target_include_directories(spark_lio_sdk PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(spark_lio_sdk
+  ${PCL_LIBRARIES}
+)
+ament_target_dependencies(spark_lio_sdk
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  tf2_ros
+  pcl_conversions
+  rosbag2_cpp
+  rosbag2_storage
+)
+
+# ---- SDK demo executable ----
+add_executable(spark_lio_sdk_demo
+  src/main.cpp
+)
+target_link_libraries(spark_lio_sdk_demo
+  spark_lio_sdk
+  ${PCL_LIBRARIES}
+)
+ament_target_dependencies(spark_lio_sdk_demo
+  rclcpp
+  sensor_msgs
+)
+
 # Install
 install(
-  TARGETS spark_lio_component
+  TARGETS spark_lio_component spark_lio_sdk spark_lio_sdk_demo
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
