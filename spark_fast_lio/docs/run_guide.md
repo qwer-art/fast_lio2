@@ -12,6 +12,8 @@ ros2 launch spark_fast_lio mapping_mit_campus.launch.yaml scene_id:=hathor robot
 ```bash
 source /home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/init_env.sh
 ros2 bag play /home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/10_14_hathor
+
+## ros2 bag play /home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/10_14_hathor --clock --rate 5.0
 ```
 
 ## 3. ROS2可视化
