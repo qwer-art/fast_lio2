@@ -14,8 +14,6 @@ OUTPUT_NAME="${DATA_DIR}/lio_$(date +%Y%m%d_%H%M%S)"
 
 # 录制话题
 ros2 bag record -o ${OUTPUT_NAME} \
-  /hathor/forward/imu \
-  /hathor/lidar_points \
   /odometry \
   /path \
   /tf \
@@ -26,3 +24,6 @@ ros2 bag record -o ${OUTPUT_NAME} \
   /debug/imu_preint_pose \
   /debug/match_quality \
   /debug/velocity
+
+# /hathor/forward/imu \
+# /hathor/lidar_points \
