@@ -83,10 +83,34 @@ add_library(ikd_tree third_party/ikd-Tree/ikd_Tree.cpp)
 # To resolve "recompile with -fPIC" issue
 set_target_properties(ikd_tree PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# ---- Fast-LIO2 algorithm core library (no ROS dependency) ----
+add_library(fast_lio2_core SHARED
+  src/fast_lio2_core.cpp
+)
+target_include_directories(fast_lio2_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  third_party/ikd-Tree
+  third_party/IKFoM_toolkit
+)
+target_link_libraries(fast_lio2_core
+  ${PCL_LIBRARIES}
+  ikd_tree
+)
+ament_target_dependencies(fast_lio2_core
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  tf2_ros
+  pcl_conversions
+)
+set_target_properties(fast_lio2_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # Optional: Livox driver
 find_package(livox_ros_driver QUIET)
 
-# Create the library as a component
+# Create the ROS node component library
 add_library(spark_lio_component SHARED
   src/spark_fast_lio.cpp
   src/preprocess.cpp
@@ -95,10 +119,11 @@ add_library(spark_lio_component SHARED
 # Example: C++ standard
 target_compile_features(spark_lio_component PUBLIC cxx_std_20)
 
-# Link external libs. Replace `ikd_tree` with your actual library name
+# Link external libs
 target_link_libraries(spark_lio_component
   ${PCL_LIBRARIES}
   ikd_tree
+  fast_lio2_core
 )
 
 # If Livox found, link it here
@@ -171,9 +196,29 @@ ament_target_dependencies(spark_lio_sdk_demo
   sensor_msgs
 )
 
+# ---- SDK runner executable (Fast-LIO2 runner) ----
+add_executable(spark_lio_run_sdk
+  src/run_sdk.cpp
+)
+target_link_libraries(spark_lio_run_sdk
+  spark_lio_sdk
+  fast_lio2_core
+  ${PCL_LIBRARIES}
+)
+ament_target_dependencies(spark_lio_run_sdk
+  rclcpp
+  sensor_msgs
+  nav_msgs
+  geometry_msgs
+  tf2_ros
+  pcl_conversions
+  rosbag2_cpp
+  rosbag2_storage
+)
+
 # Install
 install(
-  TARGETS spark_lio_component spark_lio_sdk spark_lio_sdk_demo
+  TARGETS fast_lio2_core spark_lio_component spark_lio_sdk spark_lio_sdk_demo spark_lio_run_sdk
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
