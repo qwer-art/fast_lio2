@@ -58,6 +58,10 @@ class ImuProcess {
                PointCloudXYZI::Ptr pcl_un_);
   state_ikfom IntegrateIMU(const std::deque<sensor_msgs::msg::Imu> imu_queue,
                            esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state);
+
+  // Getter for latest angular velocity (after bias correction)
+  V3D get_angvel_last() const { return angvel_last; }
+
   std::ofstream fout_imu;
   V3D cov_acc;
   V3D cov_gyr;

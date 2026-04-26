@@ -509,7 +509,7 @@ void SPARKFastLIO2::integrateIMU(esekfom::esekf<state_ikfom, 12, input_ikfom> &s
   integrated_state.pos = R_gravity_aligned_ * integrated_state.pos;
   integrated_state.rot = R_gravity_aligned_ * integrated_state.rot;
 
-  publishOdometry(integrated_state, stamp);
+  // publishOdometry(integrated_state, stamp);
 }
 
 void SPARKFastLIO2::calcHModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) {
@@ -740,6 +740,16 @@ void SPARKFastLIO2::mapIncremental() {
 }
 
 void SPARKFastLIO2::publishOdometry(const state_ikfom &state, const rclcpp::Time &stamp) {
+  // 打印Odometry关键数据: p, q, v, w
+  // p: 位置, q: 姿态四元数, v: 速度, w: 角速度(已去除零偏)
+  V3D angvel_corrected = imu_processor_->get_angvel_last();
+  RCLCPP_INFO(this->get_logger(),
+              "[New][Odometry], pose: (%.6f,%.6f,%.6f), quat: (%.6f,%.6f,%.6f,%.6f), vel: (%.6f,%.6f,%.6f), omega: (%.6f,%.6f,%.6f)",
+              state.pos(0), state.pos(1), state.pos(2),
+              state.rot.x(), state.rot.y(), state.rot.z(), state.rot.w(),
+              state.vel(0), state.vel(1), state.vel(2),
+              angvel_corrected(0), angvel_corrected(1), angvel_corrected(2));
+
   odomAftMapped_.header.frame_id = map_frame_;
   odomAftMapped_.header.stamp    = stamp;
 
