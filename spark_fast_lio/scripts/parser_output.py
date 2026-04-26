@@ -19,44 +19,11 @@ Output数据解析脚本
     - 更新状态: update_x/y/z, update_roll/pitch/yaw, update_bg_x/y/z, update_ba_x/y/z, update_Ril_x/y/z/w, update_Til_x/y/z
 """
 
-import json
 import csv
 import os
 import sys
 import math
-from pathlib import Path
-
-
-def quat_to_rpy(qw, qx, qy, qz):
-    """
-    四元数转欧拉角 (roll, pitch, yaw)
-    四元数格式: [w, x, y, z]
-    返回: (roll, pitch, yaw) 单位: 弧度
-    """
-    # 归一化
-    norm = math.sqrt(qw*qw + qx*qx + qy*qy + qz*qz)
-    if norm < 1e-10:
-        return 0.0, 0.0, 0.0
-    qw, qx, qy, qz = qw/norm, qx/norm, qy/norm, qz/norm
-
-    # Roll (x-axis rotation)
-    sinr_cosp = 2 * (qw * qx + qy * qz)
-    cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
-    roll = math.atan2(sinr_cosp, cosr_cosp)
-
-    # Pitch (y-axis rotation)
-    sinp = 2 * (qw * qy - qz * qx)
-    if abs(sinp) >= 1:
-        pitch = math.copysign(math.pi / 2, sinp)
-    else:
-        pitch = math.asin(sinp)
-
-    # Yaw (z-axis rotation)
-    siny_cosp = 2 * (qw * qz + qx * qy)
-    cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
-    yaw = math.atan2(siny_cosp, cosy_cosp)
-
-    return roll, pitch, yaw
+from datetime import datetime
 
 
 def parse_frame_time(frame_time_str):
@@ -72,16 +39,38 @@ def parse_frame_time(frame_time_str):
     return seconds + picoseconds * 1e-12
 
 
-def load_state_json(json_path):
-    """加载状态JSON文件"""
-    if not os.path.exists(json_path):
+def load_state_csv(csv_path):
+    """加载状态CSV文件，返回字典"""
+    if not os.path.exists(csv_path):
         return None
-    with open(json_path, 'r') as f:
-        return json.load(f)
+    with open(csv_path, 'r') as f:
+        line = f.readline().strip()
+        if not line:
+            return None
+        values = line.split(',')
+        if len(values) < 28:
+            return None
+        # CSV格式: frame_time,pos_x,pos_y,pos_z,quat_w,quat_x,quat_y,quat_z,
+        #         euler_roll,euler_pitch,euler_yaw,vel_x,vel_y,vel_z,
+        #         bg_x,bg_y,bg_z,ba_x,ba_y,ba_z,grav_x,grav_y,grav_z,
+        #         Ril_w,Ril_x,Ril_y,Ril_z,Til_x,Til_y,Til_z
+        return {
+            'frame_time': values[0],
+            'position': [float(values[1]), float(values[2]), float(values[3])],
+            'orientation_quat': [float(values[4]), float(values[5]), float(values[6]), float(values[7])],
+            'orientation_euler_deg': [float(values[8]), float(values[9]), float(values[10])],
+            'velocity': [float(values[11]), float(values[12]), float(values[13])],
+            'bias_gyro': [float(values[14]), float(values[15]), float(values[16])],
+            'bias_acc': [float(values[17]), float(values[18]), float(values[19])],
+            'gravity': [float(values[20]), float(values[21]), float(values[22])],
+            'offset_R_L_I': [float(values[23]), float(values[24]), float(values[25]), float(values[26])],
+            'offset_T_L_I': [float(values[27]), float(values[28]), float(values[29])] if len(values) > 28 else [0, 0, 0]
+        }
 
 
 def load_frame_info(frame_info_path):
     """加载帧信息JSON文件"""
+    import json
     if not os.path.exists(frame_info_path):
         return None
     with open(frame_info_path, 'r') as f:
@@ -129,27 +118,27 @@ def parse_output_data(output_path, asset_data_path):
         print(f"Error: pred_state directory not found: {pred_state_dir}")
         return []
 
-    # 遍历所有JSON文件
+    # 遍历所有CSV文件
     for filename in os.listdir(pred_state_dir):
-        if not filename.endswith('.json'):
+        if not filename.endswith('.csv'):
             continue
 
-        frame_time = filename[:-5]  # Remove .json
+        frame_time = filename[:-4]  # Remove .csv
         data_records[frame_time] = {'frame_time': frame_time}
 
     print(f"Found {len(data_records)} frames in pred_state")
 
     # 加载预测状态
     for frame_time in data_records:
-        json_path = os.path.join(output_path, 'pred_state', f'{frame_time}.json')
-        state = load_state_json(json_path)
+        csv_path = os.path.join(output_path, 'pred_state', f'{frame_time}.csv')
+        state = load_state_csv(csv_path)
         if state:
             data_records[frame_time]['pred_state'] = state
 
     # 加载更新状态
     for frame_time in data_records:
-        json_path = os.path.join(output_path, 'update_state', f'{frame_time}.json')
-        state = load_state_json(json_path)
+        csv_path = os.path.join(output_path, 'update_state', f'{frame_time}.csv')
+        state = load_state_csv(csv_path)
         if state:
             data_records[frame_time]['update_state'] = state
 
@@ -244,9 +233,11 @@ def write_csv(data_records, csv_path):
                 pos = pred_state.get('position', [0, 0, 0])
                 row.extend([f'{pos[0]:.9f}', f'{pos[1]:.9f}', f'{pos[2]:.9f}'])
 
-                # 姿态 - 四元数转欧拉角
-                quat = pred_state.get('orientation_quat', [1, 0, 0, 0])  # [w, x, y, z]
-                roll, pitch, yaw = quat_to_rpy(quat[0], quat[1], quat[2], quat[3])
+                # 姿态 - 直接使用euler_deg (已经是度数，需要转换为弧度)
+                euler_deg = pred_state.get('orientation_euler_deg', [0, 0, 0])
+                roll = euler_deg[0] * math.pi / 180.0
+                pitch = euler_deg[1] * math.pi / 180.0
+                yaw = euler_deg[2] * math.pi / 180.0
                 row.extend([f'{roll:.9f}', f'{pitch:.9f}', f'{yaw:.9f}'])
 
                 # 陀螺仪bias
@@ -265,7 +256,7 @@ def write_csv(data_records, csv_path):
                 Til = pred_state.get('offset_T_L_I', [0, 0, 0])
                 row.extend([f'{Til[0]:.9f}', f'{Til[1]:.9f}', f'{Til[2]:.9f}'])
             else:
-                row.extend([''] * 16)  # 3 + 3 + 3 + 3 + 4 + 3 = 19, but we need 16 for pred
+                row.extend([''] * 16)
 
             # 更新状态
             update_state = record.get('update_state')
@@ -274,9 +265,11 @@ def write_csv(data_records, csv_path):
                 pos = update_state.get('position', [0, 0, 0])
                 row.extend([f'{pos[0]:.9f}', f'{pos[1]:.9f}', f'{pos[2]:.9f}'])
 
-                # 姿态 - 四元数转欧拉角
-                quat = update_state.get('orientation_quat', [1, 0, 0, 0])  # [w, x, y, z]
-                roll, pitch, yaw = quat_to_rpy(quat[0], quat[1], quat[2], quat[3])
+                # 姿态 - 直接使用euler_deg
+                euler_deg = update_state.get('orientation_euler_deg', [0, 0, 0])
+                roll = euler_deg[0] * math.pi / 180.0
+                pitch = euler_deg[1] * math.pi / 180.0
+                yaw = euler_deg[2] * math.pi / 180.0
                 row.extend([f'{roll:.9f}', f'{pitch:.9f}', f'{yaw:.9f}'])
 
                 # 陀螺仪bias
@@ -333,7 +326,6 @@ def main():
         asset_data_path = None
 
     # 生成输出CSV路径
-    from datetime import datetime
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     analyse_path = os.path.join(output_path, f'analyse_{timestamp}.csv')
 

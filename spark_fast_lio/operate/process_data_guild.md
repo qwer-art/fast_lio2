@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-`parser_output` 工具用于将SLAM运行产生的output数据整理成CSV文件，便于使用PlotJuggler进行离线分析。
+`parser_output` 工具用于将SLAM运行产生的EKF数据整理成CSV文件，便于使用PlotJuggler进行离线分析。
 
 ## 2. 使用方法
 
@@ -15,31 +15,31 @@
 修改 `parser_output.sh` 开头的路径变量即可：
 
 ```bash
-asset_data=/path/to/asset_data
-output=/path/to/output
+asset_data=/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/asset_data
+ekf=/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/ekf
 ```
 
-CSV输出路径自动生成：`{output}/analyse_{时间}.csv`
+CSV输出路径自动生成：`{ekf}/analyse_{时间}.csv`
 
 ### 2.2 Python脚本直接调用
 
 ```bash
-python3 parser_output.py <asset_data> <output>
+python3 parser_output.py <asset_data> <ekf>
 ```
 
 **参数说明：**
 - `asset_data`: 数据同步后的文件夹地址 (包含frame_info, imu等子目录)
-- `output`: 滤波后的文件夹地址 (包含pred_state, update_state等子目录)
+- `ekf`: 滤波后的文件夹地址 (包含pred_state, update_state等子目录)
 
 **示例：**
 ```bash
 python3 parser_output.py \
     /home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/asset_data \
-    /home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/output
+    /home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/data/ekf
 ```
 
 **输出：**
-- CSV文件保存至 `{output}/analyse_{时间}.csv`
+- CSV文件保存至 `{ekf}/analyse_{时间}.csv`
 
 ## 3. 输入数据结构
 
@@ -50,11 +50,11 @@ python3 parser_output.py \
 └── imu/            # IMU数据
 ```
 
-**output目录：**
+**ekf目录：**
 ```
-<output>/
-├── pred_state/     # 预测状态 JSON文件 (必需)
-├── update_state/   # 更新状态 JSON文件 (必需)
+<ekf>/
+├── pred_state/     # 预测状态 CSV文件 (必需)
+├── update_state/   # 更新状态 CSV文件 (必需)
 ├── pred_cov/       # 预测协方差矩阵 (可选)
 └── update_cov/     # 更新协方差矩阵 (可选)
 ```
@@ -87,6 +87,10 @@ python3 parser_output.py \
 - frame_time格式: `SSSSSSSSSSSS_PPPPPPPPPPPP` (12位秒数_12位皮秒数)
 
 ## 5. PlotJuggler可视化
+
+```bash
+ros2 run plotjuggler plotjuggler
+```
 
 1. 打开PlotJuggler
 2. `File` -> `Load Data` -> 选择生成的CSV文件

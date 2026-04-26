@@ -83,6 +83,7 @@ find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(rosbag2_storage REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 if (CLEAR_WARNING_SUPPRESSION)
   unset(CMAKE_SUPPRESS_DEVELOPER_WARNINGS)
@@ -223,6 +224,7 @@ target_link_libraries(spark_lio_run_sdk
   spark_lio_sdk
   fast_lio2_core
   ${PCL_LIBRARIES}
+  yaml-cpp
 )
 ament_target_dependencies(spark_lio_run_sdk
   rclcpp

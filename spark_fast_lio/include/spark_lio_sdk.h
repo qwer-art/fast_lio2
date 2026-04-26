@@ -23,6 +23,7 @@ class SparkLioSdk {
     int scan_rate    = 10;
     int time_unit    = US;     // 0=SEC, 1=MS, 2=US, 3=NS
     double blind     = 0.01;
+    double blind_for_human_pilot = 1.5;
     int point_filter_num = 1;
     bool verbose     = false;
   };

@@ -45,6 +45,7 @@ bool SparkLioSdk::open(const std::string &bag_path,
   preprocessor_->SCAN_RATE        = config.scan_rate;
   preprocessor_->time_unit        = config.time_unit;
   preprocessor_->blind            = config.blind;
+  preprocessor_->blind_for_human_pilots = config.blind_for_human_pilot;
   preprocessor_->point_filter_num = config.point_filter_num;
 
   // Create and open bag reader
