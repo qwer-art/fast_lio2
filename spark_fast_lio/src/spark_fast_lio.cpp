@@ -81,9 +81,18 @@ SPARKFastLIO2::SPARKFastLIO2(const rclcpp::NodeOptions &options)
   // extrinT_ and extrinR_ are sized 3 and 9 respectively
   extrinT_ = declare_parameter<std::vector<double>>("mapping.extrinsic_T", extrinT_);
   extrinR_ = declare_parameter<std::vector<double>>("mapping.extrinsic_R", extrinR_);
+  RCLCPP_INFO(this->get_logger(),
+              "[New][Extrin] T=[%.6f,%.6f,%.6f], R=[%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f]",
+              extrinT_[0], extrinT_[1], extrinT_[2],
+              extrinR_[0], extrinR_[1], extrinR_[2],
+              extrinR_[3], extrinR_[4], extrinR_[5],
+              extrinR_[6], extrinR_[7], extrinR_[8]);
 
   auto g_vec = declare_parameter<std::vector<double>>("gravity_alignment.g_base", {0.0, 0.0, -1.0});
   g_base_ << g_vec[0], g_vec[1], g_vec[2];
+  RCLCPP_INFO(this->get_logger(),
+              "[New][Gbase] g_base=[%.6f,%.6f,%.6f]",
+              g_base_(0), g_base_(1), g_base_(2));
 
   rclcpp::QoS lidar_qos(rclcpp::KeepLast(10));
   lidar_qos.reliable();
@@ -150,6 +159,9 @@ SPARKFastLIO2::SPARKFastLIO2(const rclcpp::NodeOptions &options)
   imu_processor_->set_acc_cov(Eigen::Vector3d(acc_cov_, acc_cov_, acc_cov_));
   imu_processor_->set_gyr_bias_cov(Eigen::Vector3d(b_gyr_cov_, b_gyr_cov_, b_gyr_cov_));
   imu_processor_->set_acc_bias_cov(Eigen::Vector3d(b_acc_cov_, b_acc_cov_, b_acc_cov_));
+  RCLCPP_INFO(this->get_logger(),
+              "[New][ImuCov] gyr_cov=%.6f, acc_cov=%.6f, b_gyr_cov=%.6f, b_acc_cov=%.6f",
+              gyr_cov_, acc_cov_, b_gyr_cov_, b_acc_cov_);
 
   down_size_filter_.setLeafSize(filter_size_map_min_, filter_size_map_min_, filter_size_map_min_);
 
@@ -232,7 +244,7 @@ M3D SPARKFastLIO2::computeRelativeRotation(const Eigen::Vector3d &g_a, const Eig
 
 bool SPARKFastLIO2::lookupBaseExtrinsics(V3D &lidar_T_wrt_base, M3D &lidar_R_wrt_base) {
   RCLCPP_INFO(this->get_logger(),
-              "Looking up transform from %s -> %s",
+              "[New][Param]Looking up transform from %s -> %s",
               base_frame_.c_str(),
               lidar_frame_.c_str());
 
@@ -287,13 +299,13 @@ bool SPARKFastLIO2::lookupBaseExtrinsics(V3D &lidar_T_wrt_base, M3D &lidar_R_wrt
   lidar_R_wrt_base = q.toRotationMatrix();
 
   RCLCPP_INFO(this->get_logger(),
-              "Translation: [%.3f, %.3f, %.3f]",
+              "[New][Param],Translation: [%.3f, %.3f, %.3f]",
               lidar_T_wrt_base(0),
               lidar_T_wrt_base(1),
               lidar_T_wrt_base(2));
 
   RCLCPP_INFO(this->get_logger(),
-              "Rotation (Quaternion): [%.3f, %.3f, %.3f, %.3f]",
+              "[New][Param],Rotation (Quaternion): [%.3f, %.3f, %.3f, %.3f]",
               q.x(),
               q.y(),
               q.z(),
@@ -1238,6 +1250,12 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
 
   /******* Publish topics *******/
   const auto stamp = rclcpp::Time(lidar_end_time_ * 1e9);
+  RCLCPP_INFO(this->get_logger(), "[New][DataGroup] %.9f,%.9f,%.9f,%lu,%.9f,%.9f,%lu",
+    stamp.seconds(),
+    Measures.lidar_beg_time, Measures.lidar_end_time, Measures.lidar->size(),
+    Measures.imu.front()->header.stamp.sec + Measures.imu.front()->header.stamp.nanosec * 1e-9,
+    Measures.imu.back()->header.stamp.sec + Measures.imu.back()->header.stamp.nanosec * 1e-9,
+    Measures.imu.size());
   publishOdometry(latest_state_, stamp);
   publishDebugData(latest_state_, stamp);
   mapIncremental();
