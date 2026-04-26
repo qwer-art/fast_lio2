@@ -14,16 +14,10 @@ OUTPUT_NAME="${DATA_DIR}/lio_$(date +%Y%m%d_%H%M%S)"
 
 # 录制话题
 ros2 bag record -o ${OUTPUT_NAME} \
+  /hathor/forward/imu \
   /odometry \
   /path \
   /tf \
-  /tf_static \
-  /debug/delta_pose \
-  /debug/imu_bias_acc \
-  /debug/imu_bias_gyro \
-  /debug/imu_preint_pose \
-  /debug/match_quality \
-  /debug/velocity
-
-# /hathor/forward/imu \
+  /tf_static 
+  
 # /hathor/lidar_points \

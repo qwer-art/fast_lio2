@@ -8,6 +8,7 @@ from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import Pose, PoseStamped, Vector3Stamped
 from tf2_msgs.msg import TFMessage
 from std_msgs.msg import Float64MultiArray
+from sensor_msgs.msg import Imu
 
 #### 最多20hz，间隔50ms,重复的取一个就行
 def timestamp_to_frametime(timestamp):
@@ -164,8 +165,9 @@ def parse_all_topics(bag_path, save_path):
     tf_dir = os.path.join(save_path, "tf")
     tf_static_dir = os.path.join(save_path, "tf_static")
     debug_dir = os.path.join(save_path, "debug_data")
+    imu_dir = os.path.join(save_path, "imu")
 
-    for d in [odometry_dir, path_dir, tf_dir, tf_static_dir, debug_dir]:
+    for d in [odometry_dir, path_dir, tf_dir, tf_static_dir, debug_dir, imu_dir]:
         os.makedirs(d, exist_ok=True)
 
     # 打开bag
@@ -180,6 +182,7 @@ def parse_all_topics(bag_path, save_path):
     count_tf = 0
     count_tf_static = 0
     count_debug = 0
+    count_imu = 0
 
     msg_count = 0
 
@@ -228,6 +231,38 @@ def parse_all_topics(bag_path, save_path):
             with open(json_file, "w") as f:
                 json.dump(odometry_item, f, indent=2)
             count_odometry += 1
+
+        elif topic == "/hathor/forward/imu":
+            msg = deserialize_message(data, Imu)
+            timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            frame_time = timestamp_to_frametime(timestamp)
+
+            imu_item = {
+                "frame_time": frame_time,
+                "timestamp": timestamp,
+                "linear_acceleration": {
+                    "x": msg.linear_acceleration.x,
+                    "y": msg.linear_acceleration.y,
+                    "z": msg.linear_acceleration.z
+                },
+                "angular_velocity": {
+                    "x": msg.angular_velocity.x,
+                    "y": msg.angular_velocity.y,
+                    "z": msg.angular_velocity.z
+                },
+                "orientation": {
+                    "x": msg.orientation.x,
+                    "y": msg.orientation.y,
+                    "z": msg.orientation.z,
+                    "w": msg.orientation.w
+                }
+            }
+
+            # 保存为单独的JSON文件
+            json_file = os.path.join(imu_dir, f"{frame_time}.json")
+            with open(json_file, "w") as f:
+                json.dump(imu_item, f, indent=2)
+            count_imu += 1
 
         elif topic == "/path":
             msg = deserialize_message(data, Path)
@@ -463,14 +498,376 @@ def parse_all_topics(bag_path, save_path):
 
     print(f"\n完成! 共处理 {msg_count} 条消息")
     print(f"  odometry/: {count_odometry} 个文件")
+    print(f"  imu/: {count_imu} 个文件")
     print(f"  path/: {count_path} 个文件")
     print(f"  tf/: {count_tf} 个文件")
     print(f"  tf_static/: {count_tf_static} 个文件")
     print(f"  debug_data/: {count_debug} 个数据点（合并到多个文件中）")
 
 
-if __name__ == "__main__":
-    bag_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260426_174848"
-    save_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260426_174848/asset_data"
+def export_to_csv(bag_path, save_path):
+    """将关键数据导出为CSV格式，便于PlotJuggler可视化
 
-    parse_all_topics(bag_path, save_path)
+    输出:
+    1. state.csv: 位置、姿态、速度、角速度
+    2. imu_debug.csv: IMU零偏、预积分位姿、速度
+    3. covariance.csv: 协方差对角线元素（位置、姿态、速度的不确定性）
+    4. match_quality.csv: 匹配质量指标
+
+    Args:
+        bag_path: bag文件目录路径
+        save_path: 输出目录路径
+    """
+    # 创建输出目录
+    os.makedirs(save_path, exist_ok=True)
+
+    # 打开bag
+    storage_opts = StorageOptions(uri=bag_path, storage_id="sqlite3")
+    conv_opts = ConverterOptions("", "")
+    reader = SequentialReader()
+    reader.open(storage_opts, conv_opts)
+
+    # 准备CSV文件
+    state_csv = os.path.join(save_path, "state.csv")
+    imu_debug_csv = os.path.join(save_path, "imu_debug.csv")
+    cov_csv = os.path.join(save_path, "covariance.csv")
+    match_csv = os.path.join(save_path, "match_quality.csv")
+
+    # CSV表头
+    state_header = [
+        "timestamp", "frame_time",
+        "pos_x", "pos_y", "pos_z",
+        "ori_x", "ori_y", "ori_z", "ori_w",
+        "lin_x", "lin_y", "lin_z",
+        "ang_x", "ang_y", "ang_z"
+    ]
+
+    imu_debug_header = [
+        "timestamp", "frame_time",
+        "imu_bias_acc_x", "imu_bias_acc_y", "imu_bias_acc_z",
+        "imu_bias_gyro_x", "imu_bias_gyro_y", "imu_bias_gyro_z",
+        "imu_preint_x", "imu_preint_y", "imu_preint_z",
+        "velocity_x", "velocity_y", "velocity_z"
+    ]
+
+    cov_header = [
+        "timestamp", "frame_time",
+        "pos_cov_x", "pos_cov_y", "pos_cov_z",
+        "ori_cov_x", "ori_cov_y", "ori_cov_z",
+        "vel_cov_x", "vel_cov_y", "vel_cov_z"
+    ]
+
+    match_header = [
+        "timestamp", "frame_time",
+        "match_score", "match_ratio", "match_residual", "match_quality"
+    ]
+
+    # 数据缓存（用于合并同一frame_time的数据）
+    odometry_cache = {}
+    debug_cache = {}
+
+    msg_count = 0
+
+    print("正在读取bag数据...")
+    while reader.has_next():
+        topic, data, t = reader.read_next()
+
+        if topic == "/odometry":
+            msg = deserialize_message(data, Odometry)
+            timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            frame_time = timestamp_to_frametime(timestamp)
+
+            odometry_cache[frame_time] = {
+                "timestamp": timestamp,
+                "pose": msg.pose.pose,
+                "pose_cov": list(msg.pose.covariance),
+                "twist": msg.twist.twist,
+                "twist_cov": list(msg.twist.covariance)
+            }
+
+        elif topic in ["/debug/imu_bias_acc", "/debug/imu_bias_gyro",
+                       "/debug/imu_preint_pose", "/debug/velocity",
+                       "/debug/match_quality"]:
+            if topic == "/debug/imu_bias_acc":
+                msg = deserialize_message(data, Vector3Stamped)
+                timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+                frame_time = timestamp_to_frametime(timestamp)
+                if frame_time not in debug_cache:
+                    debug_cache[frame_time] = {"timestamp": timestamp}
+                debug_cache[frame_time]["imu_bias_acc"] = msg.vector
+
+            elif topic == "/debug/imu_bias_gyro":
+                msg = deserialize_message(data, Vector3Stamped)
+                timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+                frame_time = timestamp_to_frametime(timestamp)
+                if frame_time not in debug_cache:
+                    debug_cache[frame_time] = {"timestamp": timestamp}
+                debug_cache[frame_time]["imu_bias_gyro"] = msg.vector
+
+            elif topic == "/debug/imu_preint_pose":
+                msg = deserialize_message(data, PoseStamped)
+                timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+                frame_time = timestamp_to_frametime(timestamp)
+                if frame_time not in debug_cache:
+                    debug_cache[frame_time] = {"timestamp": timestamp}
+                debug_cache[frame_time]["imu_preint_pose"] = msg.pose
+
+            elif topic == "/debug/velocity":
+                msg = deserialize_message(data, Vector3Stamped)
+                timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+                frame_time = timestamp_to_frametime(timestamp)
+                if frame_time not in debug_cache:
+                    debug_cache[frame_time] = {"timestamp": timestamp}
+                debug_cache[frame_time]["velocity"] = msg.vector
+
+            elif topic == "/debug/match_quality":
+                msg = deserialize_message(data, Float64MultiArray)
+                timestamp = t * 1e-9
+                frame_time = timestamp_to_frametime(timestamp)
+                if frame_time not in debug_cache:
+                    debug_cache[frame_time] = {"timestamp": timestamp}
+                debug_cache[frame_time]["match_quality"] = list(msg.data)
+
+        msg_count += 1
+        if msg_count % 10000 == 0:
+            print(f"  已读取 {msg_count} 条消息...")
+
+    print(f"读取完成，共 {msg_count} 条消息")
+    print(f"  odometry数据: {len(odometry_cache)} 帧")
+    print(f"  debug数据: {len(debug_cache)} 帧")
+
+    # 写入CSV文件
+    print("\n正在写入CSV文件...")
+
+    # 1. state.csv
+    with open(state_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(state_header)
+
+        for frame_time in sorted(odometry_cache.keys()):
+            data = odometry_cache[frame_time]
+            p = data["pose"].position
+            o = data["pose"].orientation
+            lin = data["twist"].linear
+            ang = data["twist"].angular
+
+            writer.writerow([
+                f"{data['timestamp']:.9f}",
+                frame_time,
+                p.x, p.y, p.z,
+                o.x, o.y, o.z, o.w,
+                lin.x, lin.y, lin.z,
+                ang.x, ang.y, ang.z
+            ])
+
+    print(f"  state.csv: {len(odometry_cache)} 行")
+
+    # 2. covariance.csv
+    with open(cov_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(cov_header)
+
+        for frame_time in sorted(odometry_cache.keys()):
+            data = odometry_cache[frame_time]
+            pose_cov = data["pose_cov"]
+            twist_cov = data["twist_cov"]
+
+            # 提取协方差对角线元素
+            # pose_cov: [x, y, z, rx, ry, rz] 的6x6矩阵
+            # 对角线索引: 0, 7, 14, 21, 28, 35
+            writer.writerow([
+                f"{data['timestamp']:.9f}",
+                frame_time,
+                pose_cov[0], pose_cov[7], pose_cov[14],  # 位置方差
+                pose_cov[21], pose_cov[28], pose_cov[35],  # 姿态方差
+                twist_cov[0], twist_cov[7], twist_cov[14]  # 速度方差
+            ])
+
+    print(f"  covariance.csv: {len(odometry_cache)} 行")
+
+    # 3. imu_debug.csv
+    with open(imu_debug_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(imu_debug_header)
+
+        count_imu = 0
+        for frame_time in sorted(debug_cache.keys()):
+            data = debug_cache[frame_time]
+
+            # 检查是否有完整的IMU数据
+            if all(key in data for key in ["imu_bias_acc", "imu_bias_gyro", "velocity"]):
+                acc_bias = data["imu_bias_acc"]
+                gyro_bias = data["imu_bias_gyro"]
+                velocity = data["velocity"]
+
+                # IMU预积分位姿（可能不存在）
+                preint_x = data["imu_preint_pose"].position.x if "imu_preint_pose" in data else 0.0
+                preint_y = data["imu_preint_pose"].position.y if "imu_preint_pose" in data else 0.0
+                preint_z = data["imu_preint_pose"].position.z if "imu_preint_pose" in data else 0.0
+
+                writer.writerow([
+                    f"{data['timestamp']:.9f}",
+                    frame_time,
+                    acc_bias.x, acc_bias.y, acc_bias.z,
+                    gyro_bias.x, gyro_bias.y, gyro_bias.z,
+                    preint_x, preint_y, preint_z,
+                    velocity.x, velocity.y, velocity.z
+                ])
+                count_imu += 1
+
+    print(f"  imu_debug.csv: {count_imu} 行")
+
+    # 4. match_quality.csv
+    with open(match_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(match_header)
+
+        count_match = 0
+        for frame_time in sorted(debug_cache.keys()):
+            data = debug_cache[frame_time]
+
+            if "match_quality" in data and len(data["match_quality"]) >= 4:
+                mq = data["match_quality"]
+                writer.writerow([
+                    f"{data['timestamp']:.9f}",
+                    frame_time,
+                    mq[0], mq[1], mq[2], mq[3]
+                ])
+                count_match += 1
+
+    print(f"  match_quality.csv: {count_match} 行")
+
+    print(f"\n完成! CSV文件已保存到: {save_path}")
+
+
+def export_to_csv(save_path):
+    """从JSON文件读取数据，导出为单个CSV文件
+
+    输入:
+        save_path: 包含JSON文件的根目录 (odometry/ 等子目录)
+
+    输出:
+        analyse_data/analyse.csv: 包含所有关键数据
+            - 时间戳、frame_time
+            - 位置 (p_x, p_y, p_z)
+            - 姿态四元数 (q_x, q_y, q_z, q_w) 和欧拉角 (roll, pitch, yaw)
+            - 速度 (v_x, v_y, v_z) 和模长 (v_norm)
+            - 角速度 (w_x, w_y, w_z) 和模长 (w_norm)
+            - 位置协方差对角线 (pos_cov_x, pos_cov_y, pos_cov_z)
+            - 姿态协方差对角线 (ori_cov_x, ori_cov_y, ori_cov_z)
+
+    Args:
+        save_path: JSON文件根目录路径
+    """
+    odometry_dir = os.path.join(save_path, "odometry")
+    output_dir = os.path.join(save_path, "analyse_data")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 读取所有odometry数据
+    print("正在读取odometry数据...")
+    odometry_data = {}
+    for filename in os.listdir(odometry_dir):
+        if filename.endswith(".json"):
+            filepath = os.path.join(odometry_dir, filename)
+            with open(filepath, "r") as f:
+                data = json.load(f)
+                frame_time = data["frame_time"]
+                odometry_data[frame_time] = data
+
+    print(f"  读取到 {len(odometry_data)} 条odometry数据")
+
+    # 写入CSV
+    output_csv = os.path.join(output_dir, "analyse.csv")
+
+    # CSV表头
+    header = [
+        "timestamp", "frame_time",
+        "p_x", "p_y", "p_z",
+        "q_x", "q_y", "q_z", "q_w",
+        "roll", "pitch", "yaw",
+        "v_x", "v_y", "v_z", "v_norm",
+        "w_x", "w_y", "w_z", "w_norm",
+        "pos_cov_x", "pos_cov_y", "pos_cov_z",
+        "ori_cov_x", "ori_cov_y", "ori_cov_z"
+    ]
+
+    print("\n正在写入CSV...")
+
+    with open(output_csv, "w", newline="\n") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+
+        # 遍历所有odometry数据
+        for frame_time in sorted(odometry_data.keys()):
+            odom = odometry_data[frame_time]
+
+            # 提取odometry数据
+            timestamp = odom["timestamp"]
+            p_x = odom["pose"]["position"]["x"]
+            p_y = odom["pose"]["position"]["y"]
+            p_z = odom["pose"]["position"]["z"]
+            q_x = odom["pose"]["orientation"]["x"]
+            q_y = odom["pose"]["orientation"]["y"]
+            q_z = odom["pose"]["orientation"]["z"]
+            q_w = odom["pose"]["orientation"]["w"]
+            v_x = odom["twist"]["linear"]["x"]
+            v_y = odom["twist"]["linear"]["y"]
+            v_z = odom["twist"]["linear"]["z"]
+            w_x = odom["twist"]["angular"]["x"]
+            w_y = odom["twist"]["angular"]["y"]
+            w_z = odom["twist"]["angular"]["z"]
+
+            # 四元数转欧拉角 (roll, pitch, yaw)
+            # 使用 Eigen 的转换公式
+            roll = np.arctan2(2.0 * (q_w * q_x + q_y * q_z), 1.0 - 2.0 * (q_x * q_x + q_y * q_y))
+            pitch = np.arcsin(np.clip(2.0 * (q_w * q_y - q_z * q_x), -1.0, 1.0))
+            yaw = np.arctan2(2.0 * (q_w * q_z + q_x * q_y), 1.0 - 2.0 * (q_y * q_y + q_z * q_z))
+
+            # 计算速度和角速度模长
+            v_norm = np.sqrt(v_x**2 + v_y**2 + v_z**2)
+            w_norm = np.sqrt(w_x**2 + w_y**2 + w_z**2)
+
+            # 提取协方差对角线
+            pose_cov = odom["pose"]["covariance"]
+            pos_cov_x = pose_cov[0]  # x方差
+            pos_cov_y = pose_cov[7]  # y方差
+            pos_cov_z = pose_cov[14]  # z方差
+            ori_cov_x = pose_cov[21]  # rx方差
+            ori_cov_y = pose_cov[28]  # ry方差
+            ori_cov_z = pose_cov[35]  # rz方差
+
+            # 写入CSV行 - 使用固定小数格式，PlotJuggler兼容
+            def fmt(val):
+                """格式化数值为固定小数格式"""
+                return f"{val:.12f}"
+
+            writer.writerow([
+                f"{timestamp:.9f}",
+                frame_time,
+                fmt(p_x), fmt(p_y), fmt(p_z),
+                fmt(q_x), fmt(q_y), fmt(q_z), fmt(q_w),
+                fmt(roll), fmt(pitch), fmt(yaw),
+                fmt(v_x), fmt(v_y), fmt(v_z), fmt(v_norm),
+                fmt(w_x), fmt(w_y), fmt(w_z), fmt(w_norm),
+                fmt(pos_cov_x), fmt(pos_cov_y), fmt(pos_cov_z),
+                fmt(ori_cov_x), fmt(ori_cov_y), fmt(ori_cov_z)
+            ])
+
+    print(f"\n完成! CSV文件已保存到: {output_csv}")
+
+
+if __name__ == "__main__":
+    bag_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260426_224032"
+    save_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260426_224032/asset_data"
+
+    # 第一步：解析bag文件
+    print("=" * 60)
+    print("Step 1: 解析bag文件")
+    print("=" * 60)
+    # parse_all_topics(bag_path, save_path)
+
+    # 第二步：导出CSV
+    print("\n" + "=" * 60)
+    print("Step 2: 导出CSV")
+    print("=" * 60)
+    export_to_csv(save_path)

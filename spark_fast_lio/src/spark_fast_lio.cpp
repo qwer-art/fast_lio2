@@ -755,6 +755,14 @@ void SPARKFastLIO2::publishOdometry(const state_ikfom &state, const rclcpp::Time
 
   setPoseStamp(state, odomAftMapped_.pose, viz_frame_);  // our template function
 
+  // fill twist (velocity and angular velocity)
+  odomAftMapped_.twist.twist.linear.x  = state.vel(0);
+  odomAftMapped_.twist.twist.linear.y  = state.vel(1);
+  odomAftMapped_.twist.twist.linear.z  = state.vel(2);
+  odomAftMapped_.twist.twist.angular.x = angvel_corrected(0);
+  odomAftMapped_.twist.twist.angular.y = angvel_corrected(1);
+  odomAftMapped_.twist.twist.angular.z = angvel_corrected(2);
+
   if (viz_frame_ == "lidar") {
     odomAftMapped_.child_frame_id = lidar_frame_;
   } else if (viz_frame_ == "base") {
@@ -1267,7 +1275,7 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
     Measures.imu.back()->header.stamp.sec + Measures.imu.back()->header.stamp.nanosec * 1e-9,
     Measures.imu.size());
   publishOdometry(latest_state_, stamp);
-  publishDebugData(latest_state_, stamp);
+  // publishDebugData(latest_state_, stamp);
   mapIncremental();
 
   if (path_en_) {
