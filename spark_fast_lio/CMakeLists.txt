@@ -1,9 +1,28 @@
 cmake_minimum_required(VERSION 3.20)
 project(spark_fast_lio)
 
-set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g -pthread")
+# Build type configuration - Release by default (no debug symbols)
+set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -pthread")
 set(CMAKE_CXX_FLAGS "-O3")
+
+# Debug build options
+option(BUILD_DEBUG "Build with debug symbols and no optimization" OFF)
+option(BUILD_RELWITHDEBINFO "Build with optimization and debug symbols" OFF)
+
+if(BUILD_DEBUG)
+  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
+  set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0 -DDEBUG")
+  message(STATUS "Building in DEBUG mode with full debug symbols")
+elseif(BUILD_RELWITHDEBINFO)
+  set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Build type" FORCE)
+  set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DNDEBUG")
+  message(STATUS "Building in RelWithDebInfo mode with debug symbols")
+else()
+  message(STATUS "Building in Release mode without debug symbols")
+  message(STATUS "To enable debug symbols: colcon build --cmake-args -DBUILD_DEBUG=ON")
+  message(STATUS "Or: colcon build --cmake-args -DBUILD_RELWITHDEBINFO=ON")
+endif()
 
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
