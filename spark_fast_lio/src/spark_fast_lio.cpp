@@ -130,6 +130,9 @@ SPARKFastLIO2::SPARKFastLIO2(const rclcpp::NodeOptions &options)
   pub_debug_quality_     = create_publisher<std_msgs::msg::Float64MultiArray>("debug/match_quality", qos);
   pub_debug_velocity_    = create_publisher<geometry_msgs::msg::Vector3Stamped>("debug/velocity", qos);
 
+  // Other state publisher (bg, ba, extrinsics, gravity)
+  pub_other_state_ = create_publisher<std_msgs::msg::Float64MultiArray>("state_other", qos);
+
   tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
   tf_buffer_      = std::make_shared<tf2_ros::Buffer>(this->get_clock());
   tf_listener_    = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -814,6 +817,52 @@ void SPARKFastLIO2::publishPath(const state_ikfom &state) {
   }
 }
 
+void SPARKFastLIO2::publishOtherState(const state_ikfom &state, const rclcpp::Time &stamp) {
+  // 打印Other State关键数据: bg, ba, extrinsics, gravity
+  // bg: 陀螺仪零偏, ba: 加速度计零偏
+  // offset_R_L_I, offset_T_L_I: LiDAR-IMU外参
+  // grav: 重力方向
+  RCLCPP_INFO(this->get_logger(),
+              "[New][OtherState], bg: (%.6f,%.6f,%.6f), ba: (%.6f,%.6f,%.6f), "
+              "offset_R: (%.6f,%.6f,%.6f), offset_T: (%.6f,%.6f,%.6f), "
+              "grav: (%.6f,%.6f,%.6f)",
+              state.bg(0), state.bg(1), state.bg(2),
+              state.ba(0), state.ba(1), state.ba(2),
+              state.offset_R_L_I.x(), state.offset_R_L_I.y(), state.offset_R_L_I.z(),
+              state.offset_T_L_I(0), state.offset_T_L_I(1), state.offset_T_L_I(2),
+              state.grav[0], state.grav[1], state.grav[2]);
+
+  // 发布 Float64MultiArray 消息
+  // 数据布局: [bg_x, bg_y, bg_z, ba_x, ba_y, ba_z,
+  //           offset_R_x, offset_R_y, offset_R_z, offset_T_x, offset_T_y, offset_T_z,
+  //           grav_x, grav_y, grav_z]
+  std_msgs::msg::Float64MultiArray msg;
+  msg.data.resize(15);
+
+  // IMU零偏
+  msg.data[0] = state.bg(0);
+  msg.data[1] = state.bg(1);
+  msg.data[2] = state.bg(2);
+  msg.data[3] = state.ba(0);
+  msg.data[4] = state.ba(1);
+  msg.data[5] = state.ba(2);
+
+  // LiDAR-IMU外参 (四元数的xyz部分 + 平移)
+  msg.data[6] = state.offset_R_L_I.x();
+  msg.data[7] = state.offset_R_L_I.y();
+  msg.data[8] = state.offset_R_L_I.z();
+  msg.data[9] = state.offset_T_L_I(0);
+  msg.data[10] = state.offset_T_L_I(1);
+  msg.data[11] = state.offset_T_L_I(2);
+
+  // 重力方向 (S2 manifold, 3维表示)
+  msg.data[12] = state.grav[0];
+  msg.data[13] = state.grav[1];
+  msg.data[14] = state.grav[2];
+
+  pub_other_state_->publish(msg);
+}
+
 void SPARKFastLIO2::publishDebugData(const state_ikfom &state, const rclcpp::Time &stamp) {
   // 1. IMU预积分Pose (从保存的预积分状态获取，应用重力对齐)
   if (has_preint_state_) {
@@ -1275,6 +1324,7 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
     Measures.imu.back()->header.stamp.sec + Measures.imu.back()->header.stamp.nanosec * 1e-9,
     Measures.imu.size());
   publishOdometry(latest_state_, stamp);
+  publishOtherState(latest_state_, stamp);
   // publishDebugData(latest_state_, stamp);
   mapIncremental();
 

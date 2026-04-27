@@ -166,8 +166,9 @@ def parse_all_topics(bag_path, save_path):
     tf_static_dir = os.path.join(save_path, "tf_static")
     debug_dir = os.path.join(save_path, "debug_data")
     imu_dir = os.path.join(save_path, "imu")
+    state_other_dir = os.path.join(save_path, "state_other")
 
-    for d in [odometry_dir, path_dir, tf_dir, tf_static_dir, debug_dir, imu_dir]:
+    for d in [odometry_dir, path_dir, tf_dir, tf_static_dir, debug_dir, imu_dir, state_other_dir]:
         os.makedirs(d, exist_ok=True)
 
     # 打开bag
@@ -183,6 +184,7 @@ def parse_all_topics(bag_path, save_path):
     count_tf_static = 0
     count_debug = 0
     count_imu = 0
+    count_state_other = 0
 
     msg_count = 0
 
@@ -191,12 +193,18 @@ def parse_all_topics(bag_path, save_path):
 
         if topic == "/odometry":
             msg = deserialize_message(data, Odometry)
-            timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            # 使用bag时间戳来同步，而不是msg.header.stamp
+            # 因为不同消息的header.stamp可能来自不同的时钟源
+            timestamp = t * 1e-9
             frame_time = timestamp_to_frametime(timestamp)
+
+            # 保存原始header时间戳用于参考
+            header_timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
             odometry_item = {
                 "frame_time": frame_time,
                 "timestamp": timestamp,
+                "header_timestamp": header_timestamp,
                 "pose": {
                     "position": {
                         "x": msg.pose.pose.position.x,
@@ -263,6 +271,51 @@ def parse_all_topics(bag_path, save_path):
             with open(json_file, "w") as f:
                 json.dump(imu_item, f, indent=2)
             count_imu += 1
+
+        elif topic == "/state_other":
+            msg = deserialize_message(data, Float64MultiArray)
+            # 数据布局: [bg_x, bg_y, bg_z, ba_x, ba_y, ba_z,
+            #           offset_R_x, offset_R_y, offset_R_z, offset_T_x, offset_T_y, offset_T_z,
+            #           grav_x, grav_y, grav_z]
+            if len(msg.data) >= 15:
+                # 使用odometry的时间戳近似（state_other没有header）
+                timestamp = t * 1e-9
+                frame_time = timestamp_to_frametime(timestamp)
+
+                state_other_item = {
+                    "frame_time": frame_time,
+                    "timestamp": timestamp,
+                    "bg": {
+                        "x": msg.data[0],
+                        "y": msg.data[1],
+                        "z": msg.data[2]
+                    },
+                    "ba": {
+                        "x": msg.data[3],
+                        "y": msg.data[4],
+                        "z": msg.data[5]
+                    },
+                    "offset_R_L_I": {
+                        "x": msg.data[6],
+                        "y": msg.data[7],
+                        "z": msg.data[8]
+                    },
+                    "offset_T_L_I": {
+                        "x": msg.data[9],
+                        "y": msg.data[10],
+                        "z": msg.data[11]
+                    },
+                    "grav": {
+                        "x": msg.data[12],
+                        "y": msg.data[13],
+                        "z": msg.data[14]
+                    }
+                }
+
+                json_file = os.path.join(state_other_dir, f"{frame_time}.json")
+                with open(json_file, "w") as f:
+                    json.dump(state_other_item, f, indent=2)
+                count_state_other += 1
 
         elif topic == "/path":
             msg = deserialize_message(data, Path)
@@ -499,6 +552,7 @@ def parse_all_topics(bag_path, save_path):
     print(f"\n完成! 共处理 {msg_count} 条消息")
     print(f"  odometry/: {count_odometry} 个文件")
     print(f"  imu/: {count_imu} 个文件")
+    print(f"  state_other/: {count_state_other} 个文件")
     print(f"  path/: {count_path} 个文件")
     print(f"  tf/: {count_tf} 个文件")
     print(f"  tf_static/: {count_tf_static} 个文件")
@@ -744,7 +798,7 @@ def export_to_csv(save_path):
     """从JSON文件读取数据，导出为单个CSV文件
 
     输入:
-        save_path: 包含JSON文件的根目录 (odometry/ 等子目录)
+        save_path: 包含JSON文件的根目录 (odometry/, state_other/ 等子目录)
 
     输出:
         analyse_data/analyse.csv: 包含所有关键数据
@@ -755,11 +809,15 @@ def export_to_csv(save_path):
             - 角速度 (w_x, w_y, w_z) 和模长 (w_norm)
             - 位置协方差对角线 (pos_cov_x, pos_cov_y, pos_cov_z)
             - 姿态协方差对角线 (ori_cov_x, ori_cov_y, ori_cov_z)
+            - IMU零偏 (bg_x, bg_y, bg_z, ba_x, ba_y, ba_z) 和模长 (bg_norm, ba_norm)
+            - 外参 (offset_R_x/y/z, offset_T_x/y/z)
+            - 重力 (grav_x, grav_y, grav_z)
 
     Args:
         save_path: JSON文件根目录路径
     """
     odometry_dir = os.path.join(save_path, "odometry")
+    state_other_dir = os.path.join(save_path, "state_other")
     output_dir = os.path.join(save_path, "analyse_data")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -776,6 +834,20 @@ def export_to_csv(save_path):
 
     print(f"  读取到 {len(odometry_data)} 条odometry数据")
 
+    # 读取所有state_other数据
+    print("正在读取state_other数据...")
+    state_other_data = {}
+    if os.path.exists(state_other_dir):
+        for filename in os.listdir(state_other_dir):
+            if filename.endswith(".json"):
+                filepath = os.path.join(state_other_dir, filename)
+                with open(filepath, "r") as f:
+                    data = json.load(f)
+                    frame_time = data["frame_time"]
+                    state_other_data[frame_time] = data
+
+    print(f"  读取到 {len(state_other_data)} 条state_other数据")
+
     # 写入CSV
     output_csv = os.path.join(output_dir, "analyse.csv")
 
@@ -788,16 +860,23 @@ def export_to_csv(save_path):
         "v_x", "v_y", "v_z", "v_norm",
         "w_x", "w_y", "w_z", "w_norm",
         "pos_cov_x", "pos_cov_y", "pos_cov_z",
-        "ori_cov_x", "ori_cov_y", "ori_cov_z"
+        "ori_cov_x", "ori_cov_y", "ori_cov_z",
+        "bg_x", "bg_y", "bg_z", "bg_norm",
+        "ba_x", "ba_y", "ba_z", "ba_norm",
+        "offset_R_x", "offset_R_y", "offset_R_z",
+        "offset_T_x", "offset_T_y", "offset_T_z",
+        "grav_x", "grav_y", "grav_z", "grav_norm"
     ]
 
-    print("\n正在写入CSV...")
+    print("\n正在同步数据并写入CSV...")
+    count_sync = 0
+    count_odom_only = 0
 
     with open(output_csv, "w", newline="\n") as f:
         writer = csv.writer(f)
         writer.writerow(header)
 
-        # 遍历所有odometry数据
+        # 遍历所有odometry数据，尝试与state_other数据同步
         for frame_time in sorted(odometry_data.keys()):
             odom = odometry_data[frame_time]
 
@@ -818,7 +897,6 @@ def export_to_csv(save_path):
             w_z = odom["twist"]["angular"]["z"]
 
             # 四元数转欧拉角 (roll, pitch, yaw)
-            # 使用 Eigen 的转换公式
             roll = np.arctan2(2.0 * (q_w * q_x + q_y * q_z), 1.0 - 2.0 * (q_x * q_x + q_y * q_y))
             pitch = np.arcsin(np.clip(2.0 * (q_w * q_y - q_z * q_x), -1.0, 1.0))
             yaw = np.arctan2(2.0 * (q_w * q_z + q_x * q_y), 1.0 - 2.0 * (q_y * q_y + q_z * q_z))
@@ -836,6 +914,39 @@ def export_to_csv(save_path):
             ori_cov_y = pose_cov[28]  # ry方差
             ori_cov_z = pose_cov[35]  # rz方差
 
+            # 尝试从state_other数据中获取IMU零偏、外参、重力
+            bg_x, bg_y, bg_z = 0.0, 0.0, 0.0
+            ba_x, ba_y, ba_z = 0.0, 0.0, 0.0
+            offset_R_x, offset_R_y, offset_R_z = 0.0, 0.0, 0.0
+            offset_T_x, offset_T_y, offset_T_z = 0.0, 0.0, 0.0
+            grav_x, grav_y, grav_z = 0.0, 0.0, 0.0
+
+            if frame_time in state_other_data:
+                other = state_other_data[frame_time]
+                bg_x = other["bg"]["x"]
+                bg_y = other["bg"]["y"]
+                bg_z = other["bg"]["z"]
+                ba_x = other["ba"]["x"]
+                ba_y = other["ba"]["y"]
+                ba_z = other["ba"]["z"]
+                offset_R_x = other["offset_R_L_I"]["x"]
+                offset_R_y = other["offset_R_L_I"]["y"]
+                offset_R_z = other["offset_R_L_I"]["z"]
+                offset_T_x = other["offset_T_L_I"]["x"]
+                offset_T_y = other["offset_T_L_I"]["y"]
+                offset_T_z = other["offset_T_L_I"]["z"]
+                grav_x = other["grav"]["x"]
+                grav_y = other["grav"]["y"]
+                grav_z = other["grav"]["z"]
+                count_sync += 1
+            else:
+                count_odom_only += 1
+
+            # 计算零偏模长
+            bg_norm = np.sqrt(bg_x**2 + bg_y**2 + bg_z**2)
+            ba_norm = np.sqrt(ba_x**2 + ba_y**2 + ba_z**2)
+            grav_norm = np.sqrt(grav_x**2 + grav_y**2 + grav_z**2)
+
             # 写入CSV行 - 使用固定小数格式，PlotJuggler兼容
             def fmt(val):
                 """格式化数值为固定小数格式"""
@@ -850,21 +961,28 @@ def export_to_csv(save_path):
                 fmt(v_x), fmt(v_y), fmt(v_z), fmt(v_norm),
                 fmt(w_x), fmt(w_y), fmt(w_z), fmt(w_norm),
                 fmt(pos_cov_x), fmt(pos_cov_y), fmt(pos_cov_z),
-                fmt(ori_cov_x), fmt(ori_cov_y), fmt(ori_cov_z)
+                fmt(ori_cov_x), fmt(ori_cov_y), fmt(ori_cov_z),
+                fmt(bg_x), fmt(bg_y), fmt(bg_z), fmt(bg_norm),
+                fmt(ba_x), fmt(ba_y), fmt(ba_z), fmt(ba_norm),
+                fmt(offset_R_x), fmt(offset_R_y), fmt(offset_R_z),
+                fmt(offset_T_x), fmt(offset_T_y), fmt(offset_T_z),
+                fmt(grav_x), fmt(grav_y), fmt(grav_z), fmt(grav_norm)
             ])
 
+    print(f"  成功同步: {count_sync} 帧")
+    print(f"  仅odometry: {count_odom_only} 帧")
     print(f"\n完成! CSV文件已保存到: {output_csv}")
 
 
 if __name__ == "__main__":
-    bag_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260426_224032"
-    save_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260426_224032/asset_data"
+    bag_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260427_215458"
+    save_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260427_215458/asset_data"
 
     # 第一步：解析bag文件
     print("=" * 60)
     print("Step 1: 解析bag文件")
     print("=" * 60)
-    # parse_all_topics(bag_path, save_path)
+    parse_all_topics(bag_path, save_path)
 
     # 第二步：导出CSV
     print("\n" + "=" * 60)

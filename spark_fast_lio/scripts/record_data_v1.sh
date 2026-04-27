@@ -18,6 +18,7 @@ ros2 bag record -o ${OUTPUT_NAME} \
   /odometry \
   /path \
   /tf \
-  /tf_static 
+  /tf_static \
+  /state_other 
   
 # /hathor/lidar_points \

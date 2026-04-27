@@ -98,6 +98,8 @@ class SPARKFastLIO2 : public rclcpp::Node {
 
   void publishOdometry(const state_ikfom &state, const rclcpp::Time &stamp);
 
+  void publishOtherState(const state_ikfom &state, const rclcpp::Time &stamp);
+
   void publishPath(const state_ikfom &state);
 
   void publishFrameWorld(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubCloud);
@@ -178,6 +180,9 @@ class SPARKFastLIO2 : public rclcpp::Node {
   rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr pub_debug_bias_acc_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_debug_quality_;
   rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr pub_debug_velocity_;
+
+  // Other state publisher (bg, ba, extrinsics, gravity)
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_other_state_;
 
   // Debug state
   state_ikfom last_state_;  // 上一帧状态，用于计算delta_pose
