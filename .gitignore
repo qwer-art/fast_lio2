@@ -4,6 +4,27 @@ cmake-build-debug*
 .clangd
 .cache/
 
+# Python compiled files and cache
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.Python
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+*.egg-info/
+dist/
+eggs/
+.eggs/
+*.egg
+
 # ROS2 colcon build directories
 build/
 install/
