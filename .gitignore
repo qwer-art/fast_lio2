@@ -45,6 +45,7 @@ spark_fast_lio/logs/
 
 prompt/
 paper/
+daily/
 
 ### C++ ###
 # Prerequisites

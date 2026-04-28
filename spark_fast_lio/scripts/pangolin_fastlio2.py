@@ -20,11 +20,11 @@ import OpenGL.GL as gl
 # Import utilities
 from utils.visualization_utils import (
     Color, color2bgr, set_gl_color, transform_points,
-    quaternion_to_rotation_matrix, pose_to_transform_matrix,
-    draw_grid_y, draw_pose, draw_arrow, draw_uncertainty_ellipse,
+    quaternion_to_rotation_matrix, quaternion_to_euler_angles, pose_to_transform_matrix,
+    draw_grid_y, draw_pose, draw_world_frame, draw_arrow, draw_uncertainty_ellipse,
     TopViewY, TopViewFV,
     load_odometry_data, load_state_other_data,
-    create_text_image
+    create_text_image, calculate_frame_distances
 )
 
 
@@ -64,6 +64,11 @@ def main():
     positions = np.array(positions)
     orientations = np.array(orientations)
 
+    # Calculate frame distances (cumulative chord length)
+    print("Calculating frame distances...")
+    frame_distances = calculate_frame_distances(positions)
+    print(f"Total distance: {frame_distances[-1]:.3f} m")
+
     # Calculate center for view
     center = np.mean(positions, axis=0) if len(positions) > 0 else np.zeros(3)
 
@@ -81,10 +86,10 @@ def main():
 
     # Camera setup
     scam = pangolin.OpenGlRenderState(
-        pangolin.ProjectionMatrix(screen_w, screen_h, 2000, 2000, 960, 540, 0.1, 200),
-        pangolin.ModelViewLookAt(center[0], center[1], center[2] + 70,
+        pangolin.ProjectionMatrix(screen_w, screen_h, 2000, 2000, 960, 540, 0.1, 500),
+        pangolin.ModelViewLookAt(center[0], center[1] + 150, center[2],
                                  center[0], center[1], center[2],
-                                 1, 0, 0))
+                                 0, 0, 1))
     handler = pangolin.Handler3D(scam)
 
     dcam = pangolin.CreateDisplay()
@@ -105,6 +110,7 @@ def main():
 
     show_top_view = pangolin.VarBool('ui.TopView', value=True, toggle=False)
     show_grid = pangolin.VarBool('ui.grid', value=True, toggle=True)
+    show_world_frame = pangolin.VarBool('ui.world_frame', value=True, toggle=True)
     show_trajectory = pangolin.VarBool('ui.trajectory', value=True, toggle=True)
     show_current_pose = pangolin.VarBool('ui.current_pose', value=True, toggle=True)
     show_uncertainty = pangolin.VarBool('ui.uncertainty', value=True, toggle=True)
@@ -114,7 +120,7 @@ def main():
     play_back = pangolin.VarBool('ui.<<', value=False, toggle=False)
     curr_frame_idx = pangolin.VarInt('ui.frame_idx', value=0, min=0, max=frame_size - 1)
     uncertainty_scale = pangolin.VarInt('ui.unc_scale', value=3, min=1, max=10)
-    pose_length = pangolin.VarInt('ui.pose_len', value=1, min=1, max=10)
+    pose_length = pangolin.VarInt('ui.pose_len', value=3, min=1, max=10)
 
     print("Starting visualization loop...")
 
@@ -158,7 +164,11 @@ def main():
 
         # Draw grid
         if show_grid.Get():
-            draw_grid_y(1., center)
+            draw_grid_y(10., center)
+
+        # Draw world coordinate frame at origin
+        if show_world_frame.Get():
+            draw_world_frame(length=10.0, line_width=4)
 
         # Draw trajectory
         if show_trajectory.Get() and len(positions) > 1:
@@ -170,6 +180,12 @@ def main():
             if len(traj_points) > 1:
                 for i in range(len(traj_points) - 1):
                     pangolin.DrawLine([traj_points[i], traj_points[i+1]])
+
+        # Draw start point (first frame position) as a large black point
+        if len(positions) > 0:
+            set_gl_color(Color.kBlack)
+            gl.glPointSize(15.0)  # Large point size
+            pangolin.DrawPoints([positions[0]])
 
         # Draw current pose
         if show_current_pose.Get() and frame_idx < len(positions):
@@ -214,8 +230,7 @@ def main():
 
         # Create and draw text information
         txt_image = create_text_image(
-            frame_idx, frame_size, odometry_data, positions, orientations,
-            state_data, covariances
+            frame_idx, frame_size, odometry_data, frame_distances
         )
 
         # Convert to RGB and upload

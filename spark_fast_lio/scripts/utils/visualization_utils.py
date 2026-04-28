@@ -62,6 +62,32 @@ def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     return R
 
 
+def quaternion_to_euler_angles(qx, qy, qz, qw):
+    """
+    Convert quaternion to Euler angles (roll, pitch, yaw)
+    Returns angles in degrees
+    """
+    # Roll (x-axis rotation)
+    sinr_cosp = 2 * (qw * qx + qy * qz)
+    cosr_cosp = 1 - 2 * (qx * qx + qy * qy)
+    roll = np.arctan2(sinr_cosp, cosr_cosp)
+
+    # Pitch (y-axis rotation)
+    sinp = 2 * (qw * qy - qz * qx)
+    if abs(sinp) >= 1:
+        pitch = np.copysign(np.pi / 2, sinp)  # use 90 degrees if out of range
+    else:
+        pitch = np.arcsin(sinp)
+
+    # Yaw (z-axis rotation)
+    siny_cosp = 2 * (qw * qz + qx * qy)
+    cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
+    yaw = np.arctan2(siny_cosp, cosy_cosp)
+
+    # Convert to degrees
+    return np.degrees(roll), np.degrees(pitch), np.degrees(yaw)
+
+
 def pose_to_transform_matrix(position, orientation):
     """Convert pose (position + quaternion) to 4x4 transform matrix"""
     x, y, z = position['x'], position['y'], position['z']
@@ -76,9 +102,9 @@ def pose_to_transform_matrix(position, orientation):
     return T
 
 
-def draw_grid_y(resolution=1., center=np.array([0, 0, 0])):
+def draw_grid_y(resolution=2., center=np.array([0, 0, 0])):
     """Draw grid on Y plane (XZ plane)"""
-    num_cells = 250
+    num_cells = 100
 
     gl.glLineWidth(2)
     set_gl_color(Color.kBlack)
@@ -111,6 +137,33 @@ def draw_pose(tf_world_key, length):
     pangolin.DrawLine([o, y])
     set_gl_color(Color.kBlue)
     pangolin.DrawLine([o, z])
+
+
+def draw_world_frame(length=10.0, line_width=3):
+    """
+    Draw world coordinate frame at origin
+    X-axis: Red
+    Y-axis: Green
+    Z-axis: Blue
+    """
+    origin = np.array([0, 0, 0])
+    x_end = np.array([length, 0, 0])
+    y_end = np.array([0, length, 0])
+    z_end = np.array([0, 0, length])
+
+    gl.glLineWidth(line_width)
+
+    # X-axis (Red)
+    set_gl_color(Color.kRed)
+    pangolin.DrawLine([origin, x_end])
+
+    # Y-axis (Green)
+    set_gl_color(Color.kGreen)
+    pangolin.DrawLine([origin, y_end])
+
+    # Z-axis (Blue)
+    set_gl_color(Color.kBlue)
+    pangolin.DrawLine([origin, z_end])
 
 
 def draw_arrow(start, end, line_width=2, color=Color.kBlack):
@@ -207,8 +260,8 @@ def draw_uncertainty_ellipse(position, covariance_3x3, scale=3.0, color=Color.kY
 def TopViewY(center=np.array([0, 0, 0])):
     """Top view looking down along Y axis"""
     scam = pangolin.OpenGlRenderState(
-        pangolin.ProjectionMatrix(1920, 1080, 2000, 2000, 960, 540, 0.1, 200),
-        pangolin.ModelViewLookAt(center[0], center[1] + 70, center[2],
+        pangolin.ProjectionMatrix(1920, 1080, 2000, 2000, 960, 540, 0.1, 500),
+        pangolin.ModelViewLookAt(center[0], center[1] + 150, center[2],
                                  center[0], center[1], center[2],
                                  0, 0, 1))
     return scam
@@ -217,9 +270,9 @@ def TopViewY(center=np.array([0, 0, 0])):
 def TopViewFV(center=np.array([0, 0, 0])):
     """Perspective view"""
     scam = pangolin.OpenGlRenderState(
-        pangolin.ProjectionMatrix(1920, 1080, 2000, 2000, 960, 540, 0.1, 200),
-        pangolin.ModelViewLookAt(center[0] - 10, center[1] - 10, center[2] + 5,
-                                 center[0] + 5, center[1] + 5, center[2],
+        pangolin.ProjectionMatrix(1920, 1080, 2000, 2000, 960, 540, 0.1, 500),
+        pangolin.ModelViewLookAt(center[0] - 20, center[1] - 20, center[2] + 15,
+                                 center[0] + 10, center[1] + 10, center[2],
                                  0, 0, 1))
     return scam
 
@@ -252,8 +305,8 @@ def load_state_other_data(data_dir):
     return data_list
 
 
-def create_text_image(frame_idx, frame_size, odometry_data, positions, orientations,
-                      state_data, covariances, width=320, height=540):
+def create_text_image(frame_idx, frame_size, odometry_data, frame_distances,
+                      width=320, height=540):
     """Create text information image"""
     txt_image = np.ones((height, width, 3), dtype=np.uint8) * 240
 
@@ -273,62 +326,30 @@ def create_text_image(frame_idx, frame_size, odometry_data, positions, orientati
         cv2.putText(txt_image, txt, (10, 40 * idx),
                    4, 0.8, color2bgr(Color.kBlack), 2)
 
-    # Position
-    if frame_idx < len(positions):
-        pos = positions[frame_idx]
-        txt = f"Pos X: {pos[0]:.4f}"
-        idx += 1
-        cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kRed), 2)
-
-        txt = f"Pos Y: {pos[1]:.4f}"
+    # Frame distance (cumulative chord length)
+    if frame_idx < len(frame_distances):
+        dist = frame_distances[frame_idx]
+        txt = f"Dist: {dist:.3f} m"
         idx += 1
         cv2.putText(txt_image, txt, (10, 40 * idx),
                    4, 0.8, color2bgr(Color.kGreen), 2)
 
-        txt = f"Pos Z: {pos[2]:.4f}"
-        idx += 1
-        cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kBlue), 2)
-
-    # Orientation
-    if frame_idx < len(orientations):
-        ori = orientations[frame_idx]
-        txt = f"Quat w: {ori[3]:.6f}"
-        idx += 1
-        cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kBlack), 2)
-
-        txt = f"Quat xyz: {ori[0]:.6f},{ori[1]:.6f},{ori[2]:.6f}"
-        idx += 1
-        cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.6, color2bgr(Color.kGray), 1)
-
-    # Gravity
-    if frame_idx < len(state_data):
-        grav = state_data[frame_idx]['grav']
-        txt = f"Grav X: {grav['x']:.4f}"
-        idx += 1
-        cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kMagenta), 2)
-
-        txt = f"Grav Y: {grav['y']:.4f}"
-        idx += 1
-        cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kMagenta), 2)
-
-        txt = f"Grav Z: {grav['z']:.4f}"
-        idx += 1
-        cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kMagenta), 2)
-
-    # Uncertainty
-    if frame_idx < len(covariances):
-        pos_cov = covariances[frame_idx][:3, :3]
-        uncertainty = np.trace(pos_cov)
-        txt = f"Uncertainty: {uncertainty:.6e}"
-        idx += 1
-        cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.7, color2bgr(Color.kYellow), 2)
-
     return txt_image
+
+
+def calculate_frame_distances(positions):
+    """
+    Calculate cumulative chord length (frame distance) from positions
+    First frame is 0.0, others are cumulative distance
+    """
+    if len(positions) == 0:
+        return np.array([])
+
+    distances = np.zeros(len(positions))
+
+    for i in range(1, len(positions)):
+        # Calculate chord length between consecutive frames
+        chord_length = np.linalg.norm(positions[i] - positions[i-1])
+        distances[i] = distances[i-1] + chord_length
+
+    return distances

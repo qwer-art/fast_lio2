@@ -1208,18 +1208,25 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
 
   static int num_consecutive_moving_frames = 0;
   if (enable_gravity_alignment_ && !is_gravity_aligned_ && !base_frame_.empty()) {
+    RCLCPP_INFO(this->get_logger(), "[DebugGravity] Gravity alignment enabled, checking motion state...");
     if (!flg_EKF_inited_) {
       // Assume that it is stationary at the beginning.
       mean_acc_stopped_ = Measures.getMeanAcc();
+      RCLCPP_INFO(this->get_logger(), "[DebugGravity] EKF not initialized, mean_acc_stopped: (%.6f,%.6f,%.6f)",
+                  mean_acc_stopped_(0), mean_acc_stopped_(1), mean_acc_stopped_(2));
     } else {
       const auto &mean_acc = Measures.getMeanAcc();
       if (isMotionStopped(mean_acc_stopped_, mean_acc, acc_diff_thr_)) {
         RCLCPP_WARN_STREAM(
             this->get_logger(),
-            "Waiting for motion to perform gravity alignment...now a robot has been stopped");
+            "[DebugGravity] Waiting for motion to perform gravity alignment...now a robot has been stopped");
+        RCLCPP_INFO(this->get_logger(), "[DebugGravity] acc_diff: %.6f, thr: %.6f",
+                    (mean_acc_stopped_ - mean_acc).norm(), acc_diff_thr_);
         num_consecutive_moving_frames = 0;
       } else {
         num_consecutive_moving_frames = min(num_consecutive_moving_frames + 1, 100000);
+        RCLCPP_INFO(this->get_logger(), "[DebugGravity] Motion detected! Moving frames: %d / %d",
+                    num_consecutive_moving_frames, num_moving_frames_thr_);
       }
     }
   }
@@ -1271,19 +1278,27 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
   // the gravity vectors are sufficiently updated.
   if (enable_gravity_alignment_ && !is_gravity_aligned_ && !base_frame_.empty() &&
       (num_consecutive_moving_frames > num_moving_frames_thr_)) {
+    RCLCPP_INFO(this->get_logger(), "[DebugGravity] Starting gravity alignment process...");
     static const auto &offset_R_I_B = lidar_R_wrt_base_ * latest_state_.offset_R_L_I.inverse();
 
     // NOTE(hlim): Here, we don't need to normalize the scale of vectors
     V3D gravity_direction = kf_.get_x().grav;
+    RCLCPP_INFO(this->get_logger(), "[DebugGravity] Current gravity direction: (%.6f,%.6f,%.6f)",
+                gravity_direction(0), gravity_direction(1), gravity_direction(2));
+
     if (global_gravity_directions_.size() < static_cast<size_t>(num_gravity_measurements_thr_)) {
       {
         std::stringstream ss;
-        ss << "Waiting for motion: " << global_gravity_directions_.size() << " / "
+        ss << "[DebugGravity] Collecting gravity measurements: " << global_gravity_directions_.size() << " / "
            << num_gravity_measurements_thr_;
         RCLCPP_INFO(this->get_logger(), "%s", ss.str().c_str());
       }
 
       global_gravity_directions_.push_back(offset_R_I_B * gravity_direction);
+      RCLCPP_INFO(this->get_logger(), "[DebugGravity] Added gravity measurement: (%.6f,%.6f,%.6f)",
+                  (offset_R_I_B * gravity_direction)(0),
+                  (offset_R_I_B * gravity_direction)(1),
+                  (offset_R_I_B * gravity_direction)(2));
     } else {
       V3D avg_global_gravity_vec = Eigen::Vector3d::Zero();
       for (const auto &gravity_vec : global_gravity_directions_) {
@@ -1291,15 +1306,21 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
       }
       avg_global_gravity_vec /= global_gravity_directions_.size();
 
+      RCLCPP_INFO(this->get_logger(), "[DebugGravity] Average gravity vector: (%.6f,%.6f,%.6f)",
+                  avg_global_gravity_vec(0), avg_global_gravity_vec(1), avg_global_gravity_vec(2));
+      RCLCPP_INFO(this->get_logger(), "[DebugGravity] Target g_base: (%.6f,%.6f,%.6f)",
+                  g_base_(0), g_base_(1), g_base_(2));
+
       R_gravity_aligned_ = computeRelativeRotation(avg_global_gravity_vec, g_base_);
 
       {
         std::stringstream ss;
-        ss << "Gravity alignment complete! `R_gravity_aligned`: " << R_gravity_aligned_;
+        ss << "[DebugGravity] Gravity alignment complete! `R_gravity_aligned`: " << R_gravity_aligned_;
         RCLCPP_INFO(this->get_logger(), "%s", ss.str().c_str());
       }
 
       is_gravity_aligned_ = true;
+      RCLCPP_INFO(this->get_logger(), "[DebugGravity] Gravity alignment flag set to TRUE");
     }
   }
 
@@ -1311,7 +1332,11 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
 
   if (enable_gravity_alignment_ && !is_gravity_aligned_ && !base_frame_.empty()) {
     RCLCPP_WARN(this->get_logger(),
-                "Gravity alignment is enabled but not yet completed. Waiting for alignment...");
+                "[DebugGravity] Gravity alignment is enabled but not yet completed. Waiting for alignment...");
+    RCLCPP_INFO(this->get_logger(), "[DebugGravity] enable_gravity_alignment=%s, is_gravity_aligned=%s, base_frame=%s",
+                enable_gravity_alignment_ ? "true" : "false",
+                is_gravity_aligned_ ? "true" : "false",
+                base_frame_.c_str());
     return;
   }
 

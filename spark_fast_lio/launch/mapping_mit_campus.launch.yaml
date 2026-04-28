@@ -35,7 +35,7 @@ launch:
           value: "$(var base_frame)"
 
         - name: "gravity_alignment.enable_gravity_alignment"
-          value: false
+          value: true
 
         - from: $(var config_path)
 
