@@ -21,16 +21,25 @@ import OpenGL.GL as gl
 from utils.visualization_utils import (
     Color, color2bgr, set_gl_color, transform_points,
     quaternion_to_rotation_matrix, quaternion_to_euler_angles, pose_to_transform_matrix,
-    draw_grid_y, draw_pose, draw_world_frame, draw_arrow, draw_uncertainty_ellipse,
+    draw_grid_y, draw_pose, draw_arrow,
     TopViewY, TopViewFV,
     load_odometry_data, load_state_other_data,
-    create_text_image, calculate_frame_distances
+    create_text_image, calculate_frame_distances,
+    parse_launch_yaml, parse_config_yaml, draw_coordinate_frame
 )
 
 
-def main():
+def main(data_dir, launch_yaml, config_yaml):
     # Data directory (should point to the bag directory, not asset_data)
-    data_dir = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_200150"
+    # Parse transform parameters
+    print("Parsing configuration files...")
+    Tbl = parse_launch_yaml(launch_yaml)  # Base to LiDAR transform
+    Tli = parse_config_yaml(config_yaml)  
+    Tli = np.linalg.inv(Tli)
+    Tbi = Tbl @ Tli  # LiDAR to IMU transform
+    print(f"Tbl (Base->LiDAR):\n{Tbl}")
+    print(f"Tli (LiDAR->IMU):\n{Tli}")
+    print(f"Tbi (Base->IMU):\n{Tbi}")
 
     print("Loading odometry data...")
     odometry_data = load_odometry_data(data_dir)
@@ -110,16 +119,16 @@ def main():
 
     show_top_view = pangolin.VarBool('ui.TopView', value=True, toggle=False)
     show_grid = pangolin.VarBool('ui.grid', value=True, toggle=True)
-    show_world_frame = pangolin.VarBool('ui.world_frame', value=True, toggle=True)
+    show_Tbb = pangolin.VarBool('ui.Tbb (base)', value=True, toggle=True)
+    show_Tbl = pangolin.VarBool('ui.Tbl (lidar)', value=False, toggle=True)
+    show_Tbi = pangolin.VarBool('ui.Tbi (imu)', value=False, toggle=True)
     show_trajectory = pangolin.VarBool('ui.trajectory', value=True, toggle=True)
-    show_current_pose = pangolin.VarBool('ui.current_pose', value=True, toggle=True)
-    show_uncertainty = pangolin.VarBool('ui.uncertainty', value=True, toggle=True)
+    show_current_pose = pangolin.VarBool('ui.curr_pose (Twi)', value=True, toggle=True)
     show_gravity = pangolin.VarBool('ui.gravity', value=True, toggle=True)
     auto_play = pangolin.VarBool('ui.Auto Play', value=False, toggle=False)
     play_step = pangolin.VarBool('ui.>>', value=False, toggle=False)
     play_back = pangolin.VarBool('ui.<<', value=False, toggle=False)
     curr_frame_idx = pangolin.VarInt('ui.frame_idx', value=0, min=0, max=frame_size - 1)
-    uncertainty_scale = pangolin.VarInt('ui.unc_scale', value=3, min=1, max=10)
     pose_length = pangolin.VarInt('ui.pose_len', value=3, min=1, max=10)
 
     print("Starting visualization loop...")
@@ -166,9 +175,21 @@ def main():
         if show_grid.Get():
             draw_grid_y(10., center)
 
-        # Draw world coordinate frame at origin
-        if show_world_frame.Get():
-            draw_world_frame(length=10.0, line_width=4)
+        # Draw coordinate frames
+        # Tbb: Base frame (identity), 4m, default ON
+        if show_Tbb.Get():
+            Tbb = np.eye(4)
+            draw_coordinate_frame(Tbb, length=4.0, line_width=3)
+
+        # Tbl: LiDAR frame relative to base, 3m, default OFF
+        if show_Tbl.Get():
+            # Tbl is the LiDAR frame in base coordinates
+            draw_coordinate_frame(Tbl, length=3.0, line_width=3)
+
+        # Tbi: IMU frame relative to base, 2m, default OFF
+        if show_Tbi.Get():
+            # Tbi is the IMU frame in base coordinates
+            draw_coordinate_frame(Tbi, length=2.0, line_width=3)
 
         # Draw trajectory
         if show_trajectory.Get() and len(positions) > 1:
@@ -201,17 +222,6 @@ def main():
             # Draw pose axes
             draw_pose(T, pose_length.Get())
 
-        # Draw uncertainty
-        if show_uncertainty.Get() and frame_idx < len(covariances):
-            current_pos = positions[frame_idx]
-            cov_matrix = covariances[frame_idx]
-
-            # Extract position covariance (first 3x3)
-            pos_cov = cov_matrix[:3, :3]
-
-            # Draw uncertainty ellipse
-            draw_uncertainty_ellipse(current_pos, pos_cov, scale=uncertainty_scale.Get(), color=Color.kYellow)
-
         # Draw gravity vector
         if show_gravity.Get() and frame_idx < len(state_data):
             state = state_data[frame_idx]
@@ -221,16 +231,17 @@ def main():
             if frame_idx < len(positions):
                 current_pos = positions[frame_idx]
 
-                # Gravity vector (scaled for visualization)
+                # Gravity vector (normalized and scaled to 3m for visualization)
                 grav_vector = np.array([grav['x'], grav['y'], grav['z']])
-                grav_end = current_pos + grav_vector * 0.1  # Scale down for visualization
+                grav_norm = grav_vector / np.linalg.norm(grav_vector)
+                grav_end = current_pos + grav_norm * 3.0  # Fixed 3m length
 
                 # Draw gravity arrow
                 draw_arrow(current_pos, grav_end, line_width=3, color=Color.kMagenta)
 
         # Create and draw text information
         txt_image = create_text_image(
-            frame_idx, frame_size, odometry_data, frame_distances
+            frame_idx, frame_size, odometry_data, state_data, frame_distances
         )
 
         # Convert to RGB and upload
@@ -244,4 +255,9 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # Default parameters
+    data_dir = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_200150"
+    launch_yaml = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/launch/mapping_mit_campus.launch.yaml"
+    config_yaml = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/config/velodyne_mit.yaml"
+
+    main(data_dir, launch_yaml, config_yaml)

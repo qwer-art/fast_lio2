@@ -99,11 +99,7 @@ _deps
 *-prefix/
 
 ### Code ###
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+.vscode/
 
 ### Eclipse ###
 .metadata
