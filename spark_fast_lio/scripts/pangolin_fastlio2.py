@@ -34,9 +34,9 @@ def main(data_dir, launch_yaml, config_yaml):
     # Parse transform parameters
     print("Parsing configuration files...")
     Tbl = parse_launch_yaml(launch_yaml)  # Base to LiDAR transform
-    Tli = parse_config_yaml(config_yaml)  
+    Tli = parse_config_yaml(config_yaml)
     Tli = np.linalg.inv(Tli)
-    Tbi = Tbl @ Tli  # LiDAR to IMU transform
+    Tbi = Tbl @ Tli  # Base to IMU transform
     print(f"Tbl (Base->LiDAR):\n{Tbl}")
     print(f"Tli (LiDAR->IMU):\n{Tli}")
     print(f"Tbi (Base->IMU):\n{Tbi}")
@@ -52,6 +52,28 @@ def main(data_dir, launch_yaml, config_yaml):
     if len(odometry_data) == 0:
         print("No data found, exiting")
         return
+
+    # Extract Twb0 from first state_other frame
+    Twb0 = np.eye(4)
+    if len(state_data) > 0 and 'Twb0' in state_data[0]:
+        twb0_data = state_data[0]['Twb0']
+        Twb0 = np.array([
+            [twb0_data['r00'], twb0_data['r01'], twb0_data['r02'], 0],
+            [twb0_data['r10'], twb0_data['r11'], twb0_data['r12'], 0],
+            [twb0_data['r20'], twb0_data['r21'], twb0_data['r22'], 0],
+            [0, 0, 0, 1]
+        ])
+        print(f"Twb0 (gravity aligned):\n{Twb0}")
+    else:
+        print("Warning: Twb0 not found in state_data, using identity")
+
+    # Calculate Twl0 and Twi0 from Twb0
+    # Twl0 = Twb0 * Tbl (world to LiDAR at initial frame)
+    # Twi0 = Twb0 * Tbi (world to IMU at initial frame)
+    Twl0 = Twb0 @ Tbl
+    Twi0 = Twb0 @ Tbi
+    print(f"Twl0 (World->LiDAR0):\n{Twl0}")
+    print(f"Twi0 (World->IMU0):\n{Twi0}")
 
     # Extract trajectory
     positions = []
@@ -119,9 +141,9 @@ def main(data_dir, launch_yaml, config_yaml):
 
     show_top_view = pangolin.VarBool('ui.TopView', value=True, toggle=False)
     show_grid = pangolin.VarBool('ui.grid', value=True, toggle=True)
-    show_Tbb = pangolin.VarBool('ui.Tbb (base)', value=True, toggle=True)
-    show_Tbl = pangolin.VarBool('ui.Tbl (lidar)', value=False, toggle=True)
-    show_Tbi = pangolin.VarBool('ui.Tbi (imu)', value=False, toggle=True)
+    show_Twb0 = pangolin.VarBool('ui.Twb0', value=True, toggle=True)
+    show_Twl0 = pangolin.VarBool('ui.Twl0', value=False, toggle=True)
+    show_Twi0 = pangolin.VarBool('ui.Twi0', value=False, toggle=True)
     show_trajectory = pangolin.VarBool('ui.trajectory', value=True, toggle=True)
     show_current_pose = pangolin.VarBool('ui.curr_pose (Twi)', value=True, toggle=True)
     show_gravity = pangolin.VarBool('ui.gravity', value=True, toggle=True)
@@ -176,20 +198,17 @@ def main(data_dir, launch_yaml, config_yaml):
             draw_grid_y(10., center)
 
         # Draw coordinate frames
-        # Tbb: Base frame (identity), 4m, default ON
-        if show_Tbb.Get():
-            Tbb = np.eye(4)
-            draw_coordinate_frame(Tbb, length=4.0, line_width=3)
+        # Twb0: World to Base0 frame (gravity aligned), 4m, default ON
+        if show_Twb0.Get():
+            draw_coordinate_frame(Twb0, length=4.0, line_width=3)
 
-        # Tbl: LiDAR frame relative to base, 3m, default OFF
-        if show_Tbl.Get():
-            # Tbl is the LiDAR frame in base coordinates
-            draw_coordinate_frame(Tbl, length=3.0, line_width=3)
+        # Twl0: World to LiDAR0 frame, 3m, default OFF
+        if show_Twl0.Get():
+            draw_coordinate_frame(Twl0, length=3.0, line_width=3)
 
-        # Tbi: IMU frame relative to base, 2m, default OFF
-        if show_Tbi.Get():
-            # Tbi is the IMU frame in base coordinates
-            draw_coordinate_frame(Tbi, length=2.0, line_width=3)
+        # Twi0: World to IMU0 frame, 2m, default OFF
+        if show_Twi0.Get():
+            draw_coordinate_frame(Twi0, length=2.0, line_width=3)
 
         # Draw trajectory
         if show_trajectory.Get() and len(positions) > 1:
@@ -256,7 +275,7 @@ def main(data_dir, launch_yaml, config_yaml):
 
 if __name__ == '__main__':
     # Default parameters
-    data_dir = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_200150"
+    data_dir = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_213020"
     launch_yaml = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/launch/mapping_mit_campus.launch.yaml"
     config_yaml = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/config/velodyne_mit.yaml"
 

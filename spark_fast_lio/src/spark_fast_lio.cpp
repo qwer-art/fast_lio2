@@ -823,6 +823,7 @@ void SPARKFastLIO2::publishOtherState(const state_ikfom &state, const rclcpp::Ti
   // bg: 陀螺仪零偏, ba: 加速度计零偏
   // offset_R_L_I, offset_T_L_I: LiDAR-IMU外参
   // grav: 重力方向
+  // Twb0: 重力对齐旋转矩阵 (R_gravity_aligned_)
   RCLCPP_INFO(this->get_logger(),
               "[New][OtherState], bg: (%.6f,%.6f,%.6f), ba: (%.6f,%.6f,%.6f), "
               "offset_R: (%.6f,%.6f,%.6f), offset_T: (%.6f,%.6f,%.6f), "
@@ -836,9 +837,10 @@ void SPARKFastLIO2::publishOtherState(const state_ikfom &state, const rclcpp::Ti
   // 发布 Float64MultiArray 消息
   // 数据布局: [bg_x, bg_y, bg_z, ba_x, ba_y, ba_z,
   //           offset_R_x, offset_R_y, offset_R_z, offset_T_x, offset_T_y, offset_T_z,
-  //           grav_x, grav_y, grav_z]
+  //           grav_x, grav_y, grav_z,
+  //           Twb0_r00, Twb0_r01, Twb0_r02, Twb0_r10, Twb0_r11, Twb0_r12, Twb0_r20, Twb0_r21, Twb0_r22]
   std_msgs::msg::Float64MultiArray msg;
-  msg.data.resize(15);
+  msg.data.resize(24);
 
   // IMU零偏
   msg.data[0] = state.bg(0);
@@ -860,6 +862,17 @@ void SPARKFastLIO2::publishOtherState(const state_ikfom &state, const rclcpp::Ti
   msg.data[12] = state.grav[0];
   msg.data[13] = state.grav[1];
   msg.data[14] = state.grav[2];
+
+  // Twb0: 重力对齐旋转矩阵 (R_gravity_aligned_, 3x3 row-major)
+  msg.data[15] = R_gravity_aligned_(0, 0);
+  msg.data[16] = R_gravity_aligned_(0, 1);
+  msg.data[17] = R_gravity_aligned_(0, 2);
+  msg.data[18] = R_gravity_aligned_(1, 0);
+  msg.data[19] = R_gravity_aligned_(1, 1);
+  msg.data[20] = R_gravity_aligned_(1, 2);
+  msg.data[21] = R_gravity_aligned_(2, 0);
+  msg.data[22] = R_gravity_aligned_(2, 1);
+  msg.data[23] = R_gravity_aligned_(2, 2);
 
   pub_other_state_->publish(msg);
 }

@@ -9,6 +9,7 @@ from geometry_msgs.msg import Pose, PoseStamped, Vector3Stamped
 from tf2_msgs.msg import TFMessage
 from std_msgs.msg import Float64MultiArray
 from sensor_msgs.msg import Imu
+import os.path as osp
 
 #### 最多20hz，间隔50ms,重复的取一个就行
 def timestamp_to_frametime(timestamp):
@@ -276,11 +277,19 @@ def parse_all_topics(bag_path, save_path):
             msg = deserialize_message(data, Float64MultiArray)
             # 数据布局: [bg_x, bg_y, bg_z, ba_x, ba_y, ba_z,
             #           offset_R_x, offset_R_y, offset_R_z, offset_T_x, offset_T_y, offset_T_z,
-            #           grav_x, grav_y, grav_z]
-            if len(msg.data) >= 15:
+            #           grav_x, grav_y, grav_z,
+            #           Twb0_r00, Twb0_r01, Twb0_r02, Twb0_r10, Twb0_r11, Twb0_r12, Twb0_r20, Twb0_r21, Twb0_r22]
+            if len(msg.data) >= 24:
                 # 使用odometry的时间戳近似（state_other没有header）
                 timestamp = t * 1e-9
                 frame_time = timestamp_to_frametime(timestamp)
+
+                # Twb0: 3x3 rotation matrix (row-major)
+                Twb0 = [
+                    [msg.data[15], msg.data[16], msg.data[17]],
+                    [msg.data[18], msg.data[19], msg.data[20]],
+                    [msg.data[21], msg.data[22], msg.data[23]]
+                ]
 
                 state_other_item = {
                     "frame_time": frame_time,
@@ -309,6 +318,11 @@ def parse_all_topics(bag_path, save_path):
                         "x": msg.data[12],
                         "y": msg.data[13],
                         "z": msg.data[14]
+                    },
+                    "Twb0": {
+                        "r00": Twb0[0][0], "r01": Twb0[0][1], "r02": Twb0[0][2],
+                        "r10": Twb0[1][0], "r11": Twb0[1][1], "r12": Twb0[1][2],
+                        "r20": Twb0[2][0], "r21": Twb0[2][1], "r22": Twb0[2][2]
                     }
                 }
 
@@ -975,8 +989,8 @@ def export_to_csv(save_path):
 
 
 if __name__ == "__main__":
-    bag_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_200150"
-    save_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_200150/asset_data"
+    bag_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_213020"
+    save_path = osp.join(bag_path, "asset_data")
 
     # 第一步：解析bag文件
     print("=" * 60)

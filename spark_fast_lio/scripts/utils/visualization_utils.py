@@ -26,6 +26,16 @@ class Color:
     kOrange = (0, 165, 255)
     kGray = (128, 128, 128)
 
+    # Dark colors for better readability
+    kDarkRed = (0, 0, 180)
+    kDarkGreen = (0, 150, 0)
+    kDarkBlue = (180, 0, 0)
+    kDarkCyan = (180, 180, 0)
+    kDarkMagenta = (180, 0, 180)
+    kDarkOrange = (0, 120, 200)
+    kDarkYellow = (0, 180, 180)
+    kDarkGray = (100, 100, 100)
+
 
 def color2bgr(color):
     """Convert color to BGR format"""
@@ -309,42 +319,42 @@ def load_state_other_data(data_dir):
 
 def create_text_image(frame_idx, frame_size, odometry_data, state_data, frame_distances,
                       width=320, height=540):
-    """Create text information image with units"""
+    """Create text information image with units and dark color scheme"""
     txt_image = np.ones((height, width, 3), dtype=np.uint8) * 240
 
     idx = 0
 
-    # Frame info
+    # Frame info - Dark Blue
     txt = f"Frame: {frame_idx}/{frame_size-1}"
     idx += 1
     cv2.putText(txt_image, txt, (10, 40 * idx),
-               4, 0.8, color2bgr(Color.kBlue), 2)
+               4, 0.8, color2bgr(Color.kDarkBlue), 2)
 
-    # Timestamp
+    # Timestamp - Dark Gray
     if frame_idx < len(odometry_data):
         timestamp = odometry_data[frame_idx]['timestamp']
         txt = f"Time: {timestamp:.2f}"
         idx += 1
         cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kBlack), 2)
+                   4, 0.8, color2bgr(Color.kDarkGray), 2)
 
-    # Frame distance (cumulative chord length)
+    # Frame distance (cumulative chord length) - Dark Green
     if frame_idx < len(frame_distances):
         dist = frame_distances[frame_idx]
         txt = f"Dist: {dist:.3f} m"
         idx += 1
         cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kGreen), 2)
+                   4, 0.8, color2bgr(Color.kDarkGreen), 2)
 
-    # Position z value
+    # Position z value - Dark Red
     if frame_idx < len(odometry_data):
         pos = odometry_data[frame_idx]['pose']['position']
         txt = f"z: {pos['z']:.3f} m"
         idx += 1
         cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kBlack), 2)
+                   4, 0.8, color2bgr(Color.kDarkRed), 2)
 
-    # Velocity magnitude
+    # Velocity magnitude - Dark Cyan
     if frame_idx < len(odometry_data):
         twist = odometry_data[frame_idx]['twist']
         vel = twist['linear']
@@ -353,9 +363,9 @@ def create_text_image(frame_idx, frame_size, odometry_data, state_data, frame_di
         txt = f"|v|: {vel_mag:.3f} m/s"
         idx += 1
         cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kBlack), 2)
+                   4, 0.8, color2bgr(Color.kDarkCyan), 2)
 
-    # Angular velocity magnitude
+    # Angular velocity magnitude - Dark Orange
     if frame_idx < len(odometry_data):
         twist = odometry_data[frame_idx]['twist']
         ang_vel = twist['angular']
@@ -364,9 +374,9 @@ def create_text_image(frame_idx, frame_size, odometry_data, state_data, frame_di
         txt = f"|w|: {ang_vel_mag:.3f} rad/s"
         idx += 1
         cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kBlack), 2)
+                   4, 0.8, color2bgr(Color.kDarkOrange), 2)
 
-    # Gravity magnitude
+    # Gravity magnitude - Dark Magenta
     if frame_idx < len(state_data):
         grav = state_data[frame_idx]['grav']
         grav_vector = np.array([grav['x'], grav['y'], grav['z']])
@@ -374,9 +384,9 @@ def create_text_image(frame_idx, frame_size, odometry_data, state_data, frame_di
         txt = f"|g|: {grav_mag:.3f} m/s^2"
         idx += 1
         cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kMagenta), 2)
+                   4, 0.8, color2bgr(Color.kDarkMagenta), 2)
 
-    # Accelerometer bias magnitude
+    # Accelerometer bias magnitude - Dark Yellow
     if frame_idx < len(state_data):
         ba = state_data[frame_idx]['ba']
         ba_vector = np.array([ba['x'], ba['y'], ba['z']])
@@ -384,9 +394,9 @@ def create_text_image(frame_idx, frame_size, odometry_data, state_data, frame_di
         txt = f"|ba|: {ba_mag:.3f} m/s^2"
         idx += 1
         cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kBlack), 2)
+                   4, 0.8, color2bgr(Color.kDarkYellow), 2)
 
-    # Gyroscope bias magnitude
+    # Gyroscope bias magnitude - Dark Red
     if frame_idx < len(state_data):
         bg = state_data[frame_idx]['bg']
         bg_vector = np.array([bg['x'], bg['y'], bg['z']])
@@ -394,7 +404,7 @@ def create_text_image(frame_idx, frame_size, odometry_data, state_data, frame_di
         txt = f"|bg|: {bg_mag:.3f} rad/s"
         idx += 1
         cv2.putText(txt_image, txt, (10, 40 * idx),
-                   4, 0.8, color2bgr(Color.kBlack), 2)
+                   4, 0.8, color2bgr(Color.kDarkRed), 2)
 
     return txt_image
 
