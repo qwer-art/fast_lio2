@@ -103,7 +103,7 @@ def pose_to_transform_matrix(position, orientation):
 
 
 def draw_grid_y(resolution=2., center=np.array([0, 0, 0])):
-    """Draw grid on Y plane (XZ plane)"""
+    """Draw grid on XY plane (Z=0 plane) for top-down view"""
     num_cells = 100
 
     gl.glLineWidth(2)
@@ -115,11 +115,12 @@ def draw_grid_y(resolution=2., center=np.array([0, 0, 0])):
     col_ends = []
     for idx in range(-num_cells, num_cells + 1):
         delta = idx * resolution
-        row_starts.append(np.array([delta, 0, -num_cells * resolution]) + center)
-        row_ends.append(np.array([delta, 0, num_cells * resolution]) + center)
+        # Grid on XY plane (Z=0)
+        row_starts.append(np.array([delta, -num_cells * resolution, 0]) + center)
+        row_ends.append(np.array([delta, num_cells * resolution, 0]) + center)
 
-        col_starts.append(np.array([-num_cells * resolution, 0, delta]) + center)
-        col_ends.append(np.array([num_cells * resolution, 0, delta]) + center)
+        col_starts.append(np.array([-num_cells * resolution, delta, 0]) + center)
+        col_ends.append(np.array([num_cells * resolution, delta, 0]) + center)
 
     pangolin.DrawLines(row_starts, row_ends)
     pangolin.DrawLines(col_starts, col_ends)
@@ -258,12 +259,12 @@ def draw_uncertainty_ellipse(position, covariance_3x3, scale=3.0, color=Color.kY
 
 
 def TopViewY(center=np.array([0, 0, 0])):
-    """Top view looking down along Y axis"""
+    """Top view looking down along Z axis, with Z-axis pointing up"""
     scam = pangolin.OpenGlRenderState(
         pangolin.ProjectionMatrix(1920, 1080, 2000, 2000, 960, 540, 0.1, 500),
-        pangolin.ModelViewLookAt(center[0], center[1] + 150, center[2],
+        pangolin.ModelViewLookAt(center[0], center[1], center[2] + 150,
                                  center[0], center[1], center[2],
-                                 0, 0, 1))
+                                 0, 1, 0))
     return scam
 
 

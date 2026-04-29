@@ -29,8 +29,8 @@ from utils.visualization_utils import (
 
 
 def main():
-    # Data directory
-    data_dir = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260427_215458"
+    # Data directory (should point to the bag directory, not asset_data)
+    data_dir = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_200150"
 
     print("Loading odometry data...")
     odometry_data = load_odometry_data(data_dir)

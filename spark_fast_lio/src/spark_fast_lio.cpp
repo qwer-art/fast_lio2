@@ -756,7 +756,8 @@ void SPARKFastLIO2::publishOdometry(const state_ikfom &state, const rclcpp::Time
   odomAftMapped_.header.frame_id = map_frame_;
   odomAftMapped_.header.stamp    = stamp;
 
-  setPoseStamp(state, odomAftMapped_.pose, viz_frame_);  // our template function
+  std::string odo_viz_frame = "imu";
+  setPoseStamp(state, odomAftMapped_.pose, odo_viz_frame);  // our template function
 
   // fill twist (velocity and angular velocity)
   odomAftMapped_.twist.twist.linear.x  = state.vel(0);
@@ -766,11 +767,11 @@ void SPARKFastLIO2::publishOdometry(const state_ikfom &state, const rclcpp::Time
   odomAftMapped_.twist.twist.angular.y = angvel_corrected(1);
   odomAftMapped_.twist.twist.angular.z = angvel_corrected(2);
 
-  if (viz_frame_ == "lidar") {
+  if (odo_viz_frame == "lidar") {
     odomAftMapped_.child_frame_id = lidar_frame_;
-  } else if (viz_frame_ == "base") {
+  } else if (odo_viz_frame == "base") {
     odomAftMapped_.child_frame_id = base_frame_;
-  } else if (viz_frame_ == "imu") {
+  } else if (odo_viz_frame == "imu") {
     odomAftMapped_.child_frame_id = imu_frame_;
   } else {
     throw std::invalid_argument("Invalid visualization frame has been given");
@@ -1326,9 +1327,6 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
 
   latest_state_          = kf_.get_x();
   kf_for_preintegration_ = kf_;
-  // Update corrected rotation here
-  latest_state_.pos = R_gravity_aligned_ * latest_state_.pos;
-  latest_state_.rot = R_gravity_aligned_ * latest_state_.rot;
 
   if (enable_gravity_alignment_ && !is_gravity_aligned_ && !base_frame_.empty()) {
     RCLCPP_WARN(this->get_logger(),
@@ -1342,19 +1340,38 @@ void SPARKFastLIO2::processLidarAndImu(MeasureGroup &Measures) {
 
   /******* Publish topics *******/
   const auto stamp = rclcpp::Time(lidar_end_time_ * 1e9);
+
+  // 创建一个新的状态变量用于发布，不修改全局变量 latest_state_
+  state_ikfom state_for_publish = latest_state_;
+
+  // 计算从base到IMU的旋转: Rib = lidar_R_wrt_base * offset_R_L_I.inverse()
+  // Rwi0 = Rwb0 * Rbi0 = Rwb0 * Rib^T
+  M3D R_I_B = lidar_R_wrt_base_ * latest_state_.offset_R_L_I.inverse();
+  M3D R_wi0 = R_gravity_aligned_ * R_I_B;
+
+  // 应用重力对齐变换
+  // 位置: pw = Rwi0 * pi0 + pwi0 (pwi0是0向量)
+  state_for_publish.pos = R_wi0 * latest_state_.pos;
+  // 旋转: Rwi = Rwi0 * Ri0i
+  state_for_publish.rot = R_wi0 * latest_state_.rot;
+  // 速度: vw = Rwi0 * vi0
+  state_for_publish.vel = R_wi0 * latest_state_.vel;
+  // 重力: gw = Rwi0 * gi0
+  state_for_publish.grav = R_wi0 * latest_state_.grav;
+
   RCLCPP_INFO(this->get_logger(), "[New][DataGroup] %.9f,%.9f,%.9f,%lu,%.9f,%.9f,%lu",
     stamp.seconds(),
     Measures.lidar_beg_time, Measures.lidar_end_time, Measures.lidar->size(),
     Measures.imu.front()->header.stamp.sec + Measures.imu.front()->header.stamp.nanosec * 1e-9,
     Measures.imu.back()->header.stamp.sec + Measures.imu.back()->header.stamp.nanosec * 1e-9,
     Measures.imu.size());
-  publishOdometry(latest_state_, stamp);
-  publishOtherState(latest_state_, stamp);
+  publishOdometry(state_for_publish, stamp);
+  publishOtherState(state_for_publish, stamp);
   // publishDebugData(latest_state_, stamp);
   mapIncremental();
 
   if (path_en_) {
-    publishPath(latest_state_);
+    publishPath(state_for_publish);
   }
   if (scan_pub_en_) {
     publishFrameWorld(pub_cloud_full_);

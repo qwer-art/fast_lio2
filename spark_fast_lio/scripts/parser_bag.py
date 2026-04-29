@@ -975,8 +975,8 @@ def export_to_csv(save_path):
 
 
 if __name__ == "__main__":
-    bag_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260427_215458"
-    save_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260427_215458/asset_data"
+    bag_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_200150"
+    save_path = "/home/jerett/OpenProject/LidarSlam/spark-fast-lio/spark_fast_lio/scripts/data/lio_20260429_200150/asset_data"
 
     # 第一步：解析bag文件
     print("=" * 60)
